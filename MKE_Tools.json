@@ -1,0 +1,14 @@
+{
+    "name": "MKE_Tools",
+    "env": [
+        {
+            "MKETOOLS_DIR": "C:/Users/HELLO/Documents/houdini20.5/packages/MKE_Tools",
+            "HOUDINI_TOOLBAR_PATH": "$HOUDINI_TOOLBAR_PATH;$MKETOOLS_DIR/toolbar",
+            "HOUDINI_PATH": "$HOUDINI_PATH;$MKETOOLS_DIR/config/icons;&"
+            },
+        {
+            "PYTHONPATH": "$HOUDINI_PATH;$MKETOOLS_DIR/scripts;&"
+        }
+    ],
+    "path": "$MKETOOLS_DIR"  
+}

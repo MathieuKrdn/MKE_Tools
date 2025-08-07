@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <!-- This file contains definitions of shelves, toolbars, and tools.
+ It should not be hand-edited when it is being used by the application.
+ Note, that two definitions of the same element are not allowed in
+ a single file. -->
+
+  <toolshelf name="mke_tools" label="MKE Tools">
+    <memberTool name="mke_houdinivsc"/>
+    <memberTool name="mke_ratconverter"/>
+    <memberTool name="mke_projectsetup"/>
+    <memberTool name="mke_saveup"/>
+  </toolshelf>
+
+    <tool name="mke_ratconverter" label="RAT Converter" icon="mipmapGenerator_logo.svg">
+      <script scriptType="python"><![CDATA[from ratConverter import RatGeneratorUI
+import hou
+main_window = hou.ui.mainQtWindow()
+for widget in QtWidgets.QApplication.topLevelWidgets():
+     if isinstance(widget, RatGeneratorUI):
+         widget.close()
+ui = RatGeneratorUI(parent=main_window)
+ui.show()]]></script>
+    </tool>
+
+    <tool name="mke_projectsetup" label="Project Setup" icon="projectSetup_logo.svg">
+      <script scriptType="python"><![CDATA[import projectSetup as setup
+setup.projectSetup()]]></script>
+    </tool>
+
+    <tool name="mke_saveup" label="Save Up" icon="saveUp_logo.svg">
+      <script scriptType="python"><![CDATA[import saveUp as saveUp
+saveUp.saveUp()]]></script>
+    </tool>
+
+    <tool name="mke_houdinivsc" label="Houdini VSC" icon="houdinivsc_logo.svg">
+      <script scriptType="python"><![CDATA[import houdiniVSC as houdinivsc
+houdinivsc.houdiniVSC()]]></script>
+    </tool>
+
+</shelfDocument>
