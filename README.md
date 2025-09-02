@@ -2,8 +2,6 @@
 
 A comprehensive Houdini package providing utility tools and HDAs for VFX pipeline management and workflow optimization.
 
-![MKE Tools Logo](config/icons/mke_logo.svg)
-
 ## Table of Contents
 - [Overview](#overview)
 - [Installation](#installation)
@@ -123,47 +121,9 @@ All HDAs are LOP (Lighting/USD) nodes designed for modern USD workflows:
 - Render farm submission integration
 - Batch processing and queue management
 
-### Shelf Tools
-
-The MKE Tools shelf provides quick access to all utilities:
-
-| Tool | Icon | Description |
-|------|------|-------------|
-| **Project Setup** | ![Project Setup](config/icons/projectSetup_logo.svg) | Launch project structure creation wizard |
-| **RAT Converter** | ![RAT Converter](config/icons/mipmapGenerator_logo.svg) | Open texture conversion interface |
-| **Save Up** | ![Save Up](config/icons/saveUp_logo.svg) | Increment version and save scene |
-| **Houdini VSC** | ![Houdini VSC](config/icons/houdinivsc_logo.svg) | Generate VSCode configuration |
-
-## Usage
-
-### Quick Start
-
-1. **Create a New Project**:
-   - Click the "Project Setup" shelf tool
-   - Choose project directory and configure settings
-   - Select folder structure and cache location
-   - Tool automatically sets up environment variables
-
-2. **Convert Textures to RAT**:
-   - Click "RAT Converter" shelf tool
-   - Select texture directory
-   - Configure threading and subdirectory options
-   - Start batch conversion
-
-3. **Version Control**:
-   - Use "Save Up" to increment scene versions
-   - Maintains `_v####` naming convention
-
-4. **VSCode Integration**:
-   - Click "Houdini VSC" to generate settings
-   - Copy output to VSCode settings.json
-   - Enables proper Python IntelliSense
-
 ### Environment Variables
 
 The package sets up the following variables:
-- `$JOB`: Project root directory
-- `$HIP`: Houdini scene directory
 - `$CACHE`: Cache files directory
 - `$MKETOOLS_DIR`: Package installation directory
 
@@ -185,10 +145,9 @@ MKE_Tools/
 
 ## Requirements
 
-- **Houdini 20.5+** (tested on Houdini 20.5)
+- **Houdini 20.0+** (tested on Houdini 20.0 & 20.5)
 - **Python 3.7+** (included with Houdini)
 - **PySide2** (included with Houdini)
-- **Windows/Linux/macOS** compatible
 
 ## Contributing
 
@@ -196,13 +155,6 @@ MKE_Tools/
 2. Create a feature branch
 3. Make changes and test thoroughly
 4. Submit a pull request
-
-### Development Guidelines
-
-- Follow PEP 8 for Python code
-- Include docstrings for all functions
-- Test tools in production scenarios
-- Update README for new features
 
 ## License
 
@@ -213,7 +165,3 @@ This project is part of the MKE Tools pipeline package.
 For issues, feature requests, or questions:
 - Create an issue in the repository
 - Contact me
-
----
-
-**MKE Tools** - Streamlining VFX workflows, one tool at a time.
