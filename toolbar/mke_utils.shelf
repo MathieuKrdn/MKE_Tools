@@ -38,4 +38,56 @@ saveUp.saveUp()]]></script>
 houdinivsc.houdiniVSC()]]></script>
     </tool>
 
+      <tool name="usd_dependency_checker" label="USD Dependency Checker" icon="BUTTONS_usd">
+    <script scriptType="python">
+<![CDATA[
+import mke_usd_dependancy
+mke_usd_dependancy.main()
+]]>
+    </script>
+    <help>
+<![CDATA[
+USD Dependency Checker
+
+Analyzes USD files for all dependencies and identifies files that are not located on the configured server path.
+
+Features:
+- Scans USD files for textures, Alembic files, and USD references
+- Identifies missing files with visual indicators
+- Highlights files not on server drive (configurable path)
+- Categorizes dependencies by type (textures, geometry, USD files)
+- Context menu with copy/open location options
+- Detailed usage statistics and file locations
+- Configurable server path with persistent settings
+- Works with HDA parameters or manual file selection
+
+The tool will show a detailed report of all off-server dependencies with options to manage them.
+]]>
+    </help>
+  </tool>
+
+  <tool name="usd_dependency_config" label="Configure Server Path" icon="BUTTONS_gear">
+    <script scriptType="python">
+<![CDATA[
+import mke_usd_dependancy
+mke_usd_dependancy.configure()
+]]>
+    </script>
+    <help>
+<![CDATA[
+Configure Server Path
+
+Opens the configuration dialog to set the server path used by the USD Dependency Checker.
+
+This allows you to customize what path is considered the "server" when checking if files are properly located for rendering.
+
+Examples:
+- Windows: W:/ or Z:/projects/
+- Linux/Mac: /mnt/server/ or /Volumes/Server/
+
+Settings are saved persistently for future sessions.
+]]>
+    </help>
+  </tool>
+
 </shelfDocument>

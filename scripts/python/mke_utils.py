@@ -9,6 +9,8 @@ from pxr import Usd, Sdf
 import os
 import json
 from datetime import datetime
+import subprocess
+from PySide2 import QtWidgets, QtCore
 
 VERSION_REGEX = re.compile(r'v(\d{4})')
 USER_LOGIN = os.getlogin()
@@ -462,3 +464,51 @@ def create_version_with_info(
     
     # Create the version info JSON file
     return create_version_info(version_data, output_folder)
+
+def get_file_extension(file_path):
+    """
+    Get the file extension in lowercase
+    Args:
+        file_path (str): The file path.
+    Returns:
+        str: The file extension in lowercase.
+    """
+    return os.path.splitext(file_path)[1].lower()
+
+def shorten_path(path, max_length=60):
+    """
+    Shorten a path for display purposes
+    
+    Args:
+        path (str): The full file path.
+        max_length (int): Maximum length of the displayed path.
+    Returns:
+        str: The shortened path.
+    """
+    if len(path) <= max_length:
+        return path
+    
+    parts = path.split(os.sep)
+    if len(parts) > 3:
+        return f"{parts[0]}{os.sep}...{os.sep}{parts[-2]}{os.sep}{parts[-1]}"
+    else:
+        return f"...{path[-max_length:]}"
+
+def open_file_location(file_path):
+    """
+    Open the file location in the explorer
+    
+    Args:
+        file_path (str): The file path to open.
+    """
+    try:
+        if os.path.exists(file_path):
+            folder_path = os.path.dirname(file_path)
+            subprocess.run(['explorer', '/select,', file_path])
+        else:
+            # if file doesn't exist, just open the folder if it exists
+            folder_path = os.path.dirname(file_path)
+            if os.path.exists(folder_path):
+                subprocess.run(['explorer', folder_path])
+    except Exception as e:
+        print(f"Error opening file location: {e}")
