@@ -2,7 +2,7 @@
     "name": "MKE_Tools",
     "env": [
         {
-            "MKETOOLS_DIR": "C:/Users/HELLO/Documents/houdini20.5/packages/MKE_Tools",
+            "MKETOOLS_DIR": "$HOUDINI_PACKAGE_PATH/MKE_Tools",
             "HOUDINI_TOOLBAR_PATH": "$HOUDINI_TOOLBAR_PATH;$MKETOOLS_DIR/toolbar",
             "HOUDINI_PATH": "$HOUDINI_PATH;$MKETOOLS_DIR/config/icons;&"
             },
