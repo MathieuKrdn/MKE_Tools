@@ -5,8 +5,8 @@
  Note, that two definitions of the same element are not allowed in
  a single file. -->
 
-  <toolshelf name="mke_tools" label="MKE Tools">
-    <memberTool name="mke_houdinivsc"/>
+  <toolshelf name="dev" label="DEV"/>
+      <memberTool name="mke_houdinivsc"/>
     <memberTool name="mke_ratconverter"/>
     <memberTool name="mke_projectsetup"/>
     <memberTool name="mke_saveup"/>
@@ -89,40 +89,4 @@ Settings are saved persistently for future sessions.
 ]]>
     </help>
   </tool>
-
-  <tool name="lineup" label="Line Up Objects" icon="lineup_logo.svg">
-    <script scriptType="python">
-<![CDATA[
-import lineup
-lineup.lineup()
-]]>
-    </script>
-    <help>
-<![CDATA[
-Line Up Objects
-
-Aligns selected object nodes in a row with customizable spacing and automatic size labels.
-
-Features:
-- Aligns multiple objects horizontally with proper spacing
-- Displays real-time size measurements (width, height, depth) above each object
-- Automatic unit conversion (km, m, cm, mm) for readable dimensions
-- Creates a CONTROLLER node with update and delete controls
-- Customizable padding between objects (Small/Medium/Large/Extra Large)
-- Non-destructive workflow - maintains original geometry
-- Automatic network organization and layout
-
-Usage:
-1. Select one or more object nodes in the /obj context
-2. Run the tool
-3. Choose desired padding size from the dialog
-4. Objects will be aligned with size labels automatically created
-
-The CONTROLLER node provides:
-- Update Alignment: Refresh positions and measurements after geometry changes
-- Delete Alignment: Remove all alignment helpers and restore independence
-]]>
-    </help>
-  </tool>
-
 </shelfDocument>
