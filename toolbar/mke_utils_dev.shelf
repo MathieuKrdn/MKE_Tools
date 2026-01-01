@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <!-- This file contains definitions of shelves, toolbars, and tools.
+ It should not be hand-edited when it is being used by the application.
+ Note, that two definitions of the same element are not allowed in
+ a single file. -->
+
+  <toolshelf name="mke_tools_dev" label="MKE Tools Dev">
+    <memberTool name="mke_houdinivsc"/>
+    <memberTool name="mke_loadScript"/>
+  </toolshelf>
+
+    <tool name="mke_houdinivsc" label="Houdini VSC" icon="houdinivsc_logo.svg">
+      <script scriptType="python"><![CDATA[import houdiniVSC as houdinivsc
+houdinivsc.houdiniVSC()]]></script>
+    </tool>
+
+    <tool name="mke_loadScript" label="Load Script" icon="houdinivsc_logo.svg">
+      <script scriptType="python"><![CDATA[import mke_loadScript
+mke_loadScript.loadScript()]]></script>
+    </tool>
+
+        <tool name="mke_mtlxConvert" label="Mtlx Convert" icon="houdinivsc_logo.svg">
+      <script scriptType="python"><![CDATA[import mke_mtlxConvert
+mke_mtlxConvert.convert()]]></script>
+    </tool>
+
+
+</shelfDocument>

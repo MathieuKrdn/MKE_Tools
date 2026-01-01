@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mainMenu>
+    <menuBar>
+        <subMenu id="mk_utils_menu">
+            <label>MK Utils</label>
+            <insertAfter />
+            
+            <scriptItem id="mke_project_setup">
+                <label>Project Setup</label>
+                <scriptCode><![CDATA[import projectSetup
+projectSetup.projectSetup()]]></scriptCode>
+            </scriptItem>
+            
+            <scriptItem id="mke_save_up">
+                <label>Save Up</label>
+                <scriptCode><![CDATA[import saveUp
+saveUp.saveUp()]]></scriptCode>
+            </scriptItem>
+            
+            <scriptToggleItem id="autosave_toggle">
+        <label>Auto Version Save</label>
+        <variableName>AUTOSAVE_TOGGLE</variableName>
+        <scriptCode><![CDATA[
+import hou
+import saveUp
+
+hou.hscript("""
+if( $AUTOSAVE_TOGGLE ) then
+set -g AUTOSAVE_TOGGLE = 0;
+else
+set -g AUTOSAVE_TOGGLE = 1;
+endif
+""")
+hou.hscript('varchange AUTOSAVE_TOGGLE')
+
+#current state
+(out, err) = hou.hscript('echo $AUTOSAVE_TOGGLE')
+enabled = int(out.strip()) == 1
+
+#timer callback
+def auto_version_save():
+    (out, err) = hou.hscript('echo $AUTOSAVE_TOGGLE')
+    if int(out.strip()) == 1:
+        try:
+            saveUp.saveUp()
+            print("Auto version save completed")
+        except Exception as e:
+            print(f"Auto version save failed: {e}")
+    return 1200.0 #20mn
+
+if enabled:
+    if not hasattr(hou.session, 'auto_version_timer'):
+        hou.session.auto_version_timer = None
+    
+    #del old timer if exists
+    if hou.session.auto_version_timer is not None:
+        hou.ui.removeEventLoopCallback(hou.session.auto_version_timer)
+    
+    #add new timer
+    hou.session.auto_version_timer = hou.ui.addEventLoopCallback(auto_version_save)
+    hou.ui.displayMessage("Auto version save enabled (every 20 min)", severity=hou.severityType.Message)
+else:
+    #stop timer
+    if hasattr(hou.session, 'auto_version_timer') and hou.session.auto_version_timer is not None:
+        hou.ui.removeEventLoopCallback(hou.session.auto_version_timer)
+        hou.session.auto_version_timer = None
+    hou.ui.displayMessage("Auto version save disabled", severity=hou.severityType.Message)
+]]></scriptCode>
+    </scriptToggleItem>
+            
+        </subMenu>
+    </menuBar>
+</mainMenu>
