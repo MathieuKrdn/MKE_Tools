@@ -7,6 +7,7 @@ EntitiesDialog      -> "+ Plan / asset"
 import datetime
 import os
 import subprocess
+import sys
 
 import hou
 from hutil.Qt import QtCore, QtGui, QtWidgets
@@ -1020,6 +1021,16 @@ class TimePanel(QtWidgets.QWidget):
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
 
 
+def reveal(path):
+    """Open the Windows Explorer on path, with the folder/file selected."""
+    if not path or not os.path.exists(path):
+        return
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+    else:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
+
+
 class DiskPanel(QtWidgets.QWidget):
     """Cache versions of the project with their size; old ones can be sent to the Recycle Bin."""
 
@@ -1032,6 +1043,10 @@ class DiskPanel(QtWidgets.QWidget):
         self.tree.setHeaderLabels(["Cache / version", "Taille", "Modifié"])
         self.tree.setAlternatingRowColors(True)
         self.tree.itemChanged.connect(lambda *_: self._refresh_selection())
+        self.tree.itemDoubleClicked.connect(lambda item, _: reveal(self._path(item)))
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._menu)
+        self.tree.setToolTip("Double-clic : ouvrir dans l'explorateur. Clic droit : plus d'options.")
         analyse = QtWidgets.QPushButton("Analyser")
         analyse.clicked.connect(self.scan)
         self.keep = QtWidgets.QSpinBox()
@@ -1072,6 +1087,7 @@ class DiskPanel(QtWidgets.QWidget):
             size = sum(v["size"] for v in versions)
             total += size
             parent = QtWidgets.QTreeWidgetItem(self.tree, [f"{cache}   ({len(versions)} versions)", mke_tracking.human(size), ""])
+            parent.setData(0, QtCore.Qt.UserRole + 1, f"{self.info['root']}/{cache}")
             for v in versions:
                 item = QtWidgets.QTreeWidgetItem(parent, [v["version"], mke_tracking.human(v["size"]),
                                                           datetime.datetime.fromtimestamp(v["mtime"]).strftime("%Y-%m-%d %H:%M")])
@@ -1082,6 +1098,28 @@ class DiskPanel(QtWidgets.QWidget):
         self.tree.resizeColumnToContents(0)
         self.summary.setText(f"{mke_tracking.human(total)} de caches dans {len(self.caches)} dossiers de cache.")
         self._refresh_selection()
+
+    def _path(self, item):
+        data = item.data(0, QtCore.Qt.UserRole) if item else None
+        return data["path"] if data else (item.data(0, QtCore.Qt.UserRole + 1) if item else None)
+
+    def _menu(self, position):
+        item = self.tree.itemAt(position)
+        path = self._path(item)
+        if not path:
+            return
+        menu = QtWidgets.QMenu(self)
+        explore = menu.addAction("Ouvrir dans l'explorateur")
+        copy = menu.addAction("Copier le chemin")
+        trash = menu.addAction("Mettre à la corbeille...") if item.data(0, QtCore.Qt.UserRole) else None
+        choice = menu.exec_(self.tree.viewport().mapToGlobal(position))
+        if choice == explore:
+            reveal(path)
+        elif choice == copy:
+            QtWidgets.QApplication.clipboard().setText(os.path.normpath(path))
+            hou.ui.setStatusMessage(f"Copié : {os.path.normpath(path)}")
+        elif trash is not None and choice == trash:
+            self._delete([item.data(0, QtCore.Qt.UserRole)])
 
     def checked(self):
         result = []
@@ -1112,8 +1150,8 @@ class DiskPanel(QtWidgets.QWidget):
         self.delete_button.setText(f"Corbeille ({mke_tracking.human(size)})" if selection else "Corbeille")
         self.delete_button.setToolTip("Envoie les versions cochées dans la Corbeille de Windows (récupérables)")
 
-    def _delete(self):
-        selection = self.checked()
+    def _delete(self, selection=None):
+        selection = selection or self.checked()
         if not selection:
             return
         size = mke_tracking.human(sum(v["size"] for v in selection))
