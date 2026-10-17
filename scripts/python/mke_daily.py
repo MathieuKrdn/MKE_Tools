@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import hou
 from hutil.Qt import QtCore, QtWidgets
@@ -125,6 +126,12 @@ class DailyDialog(QtWidgets.QDialog):
         self.scale.setCurrentIndex(2 if w >= 3000 else 0)
         self.open_after = QtWidgets.QCheckBox("Lire la vidéo à la fin")
         self.open_after.setChecked(True)
+        import mke_notify
+        self.discord = QtWidgets.QCheckBox("Notifier sur Discord")
+        self.discord.setEnabled(bool(mke_notify.webhook_url()))
+        self.discord.setChecked(self.discord.isEnabled() and mke_project.get_pref("daily_discord", True))
+        if not self.discord.isEnabled():
+            self.discord.setToolTip("Configure d'abord le webhook : MK Utils > Discord Notifications...")
         self.preview = ui._label("", "hint")
         self.preview.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self.error = ui._label("", "warning")
@@ -147,7 +154,7 @@ class DailyDialog(QtWidgets.QDialog):
         ]))
         layout.addWidget(self.preview)
         layout.addWidget(self.error)
-        layout.addLayout(ui._row(self.open_after, None, cancel, run))
+        layout.addLayout(ui._row(self.open_after, self.discord, None, cancel, run))
         for widget in (self.context, self.description, self.version, self.initials):
             widget.textChanged.connect(self._refresh)
         for widget in (self.start, self.end):
@@ -185,7 +192,10 @@ class DailyDialog(QtWidgets.QDialog):
         mke_project.set_pref("initials", self.initials.text().strip().upper())
         pct = self.scale.currentData()
         res = [max(2, v * pct // 100) for v in self.info["resolution"]]
+        if self.discord.isEnabled():
+            mke_project.set_pref("daily_discord", self.discord.isChecked())
         self.hide()
+        started = time.time()
         try:
             with hou.InterruptableOperation("Daily flipbook", open_interrupt_dialog=True):
                 flipbook(path, self.start.value(), self.end.value(), res, self.info["fps"])
@@ -195,6 +205,9 @@ class DailyDialog(QtWidgets.QDialog):
             return
         self.accept()
         hou.ui.setStatusMessage(f"Daily : {os.path.basename(path)}")
+        if self.discord.isChecked():
+            import mke_notify
+            mke_notify.daily_done(path, self.start.value(), self.end.value(), self.info["fps"], time.time() - started)
         if self.open_after.isChecked():
             os.startfile(path)
 
