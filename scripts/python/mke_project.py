@@ -143,7 +143,7 @@ def server_warning(root):
     """Message if MKE_SERVER_PATH is set (USD Dependency Checker config) and the project is not on it."""
     server = hou.getenv("MKE_SERVER_PATH") or os.environ.get("MKE_SERVER_PATH")
     if server and not _slash(os.path.abspath(root)).lower().startswith(_slash(server).lower()):
-        return f"Le projet n'est pas sur le serveur ({server}) : Deadline ne pourra pas lire ses fichiers."
+        return f"The project is not on the server ({server}): Deadline will not be able to read its files."
     return ""
 
 
@@ -219,7 +219,7 @@ def create_project(parent, name, type_, folders, settings, cache, keep_scene=Fal
     """Create folders, project.json, README, launcher and the first .hip. Returns (info, hip_path)."""
     name = sanitize_name(name)
     if not name:
-        raise ValueError("Nom de projet vide.")
+        raise ValueError("Empty project name.")
     root = _slash(os.path.join(parent, name))
     if os.path.isfile(os.path.join(root, PROJECT_FILE)):
         raise FileExistsError(root)
@@ -245,7 +245,7 @@ def create_project(parent, name, type_, folders, settings, cache, keep_scene=Fal
         build_starter_scene(info)
     hip = free_version_path(_slash(os.path.join(root, SCENES_DIR, scene_name(info))))
     hou.hipFile.save(hip)
-    record_version(hip, "Création du projet")
+    record_version(hip, "Project created")
     add_recent(root)
     return info, hip
 
@@ -290,11 +290,11 @@ def _write_readme(info):
     lines = [
         f"# {info['name']}", "",
         f"- Type : {info['type']}",
-        f"- Créé le {info['created']} par {info['author']}",
+        f"- Created on {info['created']} by {info['author']}",
         f"- {info['fps']} fps, frames {info['frame_start']}-{info['frame_end']}, {info['resolution'][0]}x{info['resolution'][1]}",
         f"- Cache : `{info['cache']}`",
-        f"- OCIO : `{info['ocio'] or 'défaut Houdini'}`", "",
-        "Lance Houdini avec `PIPELINE/launch_houdini.bat` pour avoir $JOB, $CACHE et l'OCIO du projet dès le démarrage.",
+        f"- OCIO : `{info['ocio'] or 'Houdini default'}`", "",
+        "Start Houdini with `PIPELINE/launch_houdini.bat` to get the project's $JOB, $CACHE and OCIO from startup.",
     ]
     with open(os.path.join(info["root"], "README.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -350,7 +350,7 @@ def add_entity(info, kind, frame_range=None, **names):
     For a shot, frame_range (start, end) is stored; calling again on an existing shot updates it."""
     names = {k: sanitize_name(v) for k, v in names.items()}
     if not all(names.values()):
-        raise ValueError("Nom vide.")
+        raise ValueError("Empty name.")
     presets = load_presets()
     created = []
     for template in presets[f"{kind}_folders"]:
@@ -449,7 +449,7 @@ def list_versions(folder):
             versions.append({
                 "path": path, "file": name, "mtime": mtime, "version": "auto",
                 "date": datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"), "user": "",
-                "comment": f"Sauvegarde auto de {name.replace(AUTOSAVE_SUFFIX, '')}", "thumb": None,
+                "comment": f"Autosave of {name.replace(AUTOSAVE_SUFFIX, '')}", "thumb": None,
             })
     return sorted(versions, key=lambda v: v["mtime"], reverse=True)
 
@@ -509,7 +509,7 @@ def new_entity_scene(info, kind="project", keep_scene=False, starter=True, **nam
     if starter and not keep_scene:
         build_starter_scene(info)
     hou.hipFile.save(hip)
-    record_version(hip, "Nouvelle scène")
+    record_version(hip, "New scene")
     add_recent(info["root"])
     return hip
 
@@ -578,13 +578,13 @@ def list_media(info, kind="project", **names):
                     key = (folder, match.group(1), len(match.group(2)), match.group(3))
                     sequences.setdefault(key, []).append((int(match.group(2)), path))
                     continue
-                entries.append(_media_entry(path, "Vidéo" if lower.endswith(VIDEO_EXT) else "Image", [path]))
+                entries.append(_media_entry(path, "Video" if lower.endswith(VIDEO_EXT) else "Image", [path]))
     for (folder, prefix, padding, ext), frames in sequences.items():
         frames.sort()
         if len(frames) == 1:
             entries.append(_media_entry(frames[0][1], "Image", [frames[0][1]]))
             continue
-        entry = _media_entry(f"{folder}/{prefix}{'#' * padding}{ext}", "Séquence", [p for _, p in frames])
+        entry = _media_entry(f"{folder}/{prefix}{'#' * padding}{ext}", "Sequence", [p for _, p in frames])
         entry.update({"info": f"{frames[0][0]}-{frames[-1][0]}  ({len(frames)} images)",
                       "mplay": f"{folder}/{prefix}$F{padding}{ext}"})
         entries.append(entry)
@@ -598,7 +598,7 @@ def _media_entry(path, kind, files):
         "path": path, "name": os.path.basename(path), "folder": os.path.dirname(path), "kind": kind,
         "first": files[0], "mtime": os.path.getmtime(newest),
         "date": datetime.datetime.fromtimestamp(os.path.getmtime(newest)).strftime("%Y-%m-%d %H:%M"),
-        "info": f"{size / 1e6:.1f} Mo",
+        "info": f"{size / 1e6:.1f} MB",
     }
 
 
@@ -655,7 +655,7 @@ def _autosave_tick():
         if path:
             hou.ui.setStatusMessage(f"Autosave : {os.path.basename(path)}")
     except Exception as error:  # never interrupt the artist for an autosave
-        hou.ui.setStatusMessage(f"Autosave impossible : {error}", severity=hou.severityType.Warning)
+        hou.ui.setStatusMessage(f"Autosave failed: {error}", severity=hou.severityType.Warning)
 
 
 def set_autosave(enabled):

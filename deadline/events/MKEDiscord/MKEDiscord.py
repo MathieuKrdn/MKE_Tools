@@ -43,11 +43,11 @@ def job_embed(job, title, color, extra=None):
     fields = [
         {"name": "Job", "value": job.JobName, "inline": False},
         {"name": "Frames", "value": job.JobFrames or "-", "inline": True},
-        {"name": "Durée", "value": _duration(job), "inline": True},
-        {"name": "Tâches", "value": f"{job.JobCompletedTasks}/{job.JobTaskCount}", "inline": True},
+        {"name": "Duration", "value": _duration(job), "inline": True},
+        {"name": "Tasks", "value": f"{job.JobCompletedTasks}/{job.JobTaskCount}", "inline": True},
     ]
     if job.JobExtraInfo1:
-        fields.append({"name": "Scène", "value": os.path.basename(job.JobExtraInfo1), "inline": True})
+        fields.append({"name": "Scene", "value": os.path.basename(job.JobExtraInfo1), "inline": True})
     if job.JobExtraInfo0:
         fields.append({"name": "Node", "value": job.JobExtraInfo0, "inline": True})
     fields += extra or []
@@ -97,13 +97,13 @@ class MKEDiscordListener(DeadlineEventListener):
                 reports = (errors[-1].ReportMessage or "").strip()[:900]
         except Exception:
             pass
-        extra = [{"name": "Dernière erreur", "value": f"```{reports}```" if reports else "voir Deadline Monitor", "inline": False}]
-        self.send(f"❌ **{job.JobName}** a échoué", job_embed(job, "Job Deadline en échec", RED, extra))
+        extra = [{"name": "Last error", "value": f"```{reports}```" if reports else "see Deadline Monitor", "inline": False}]
+        self.send(f"❌ **{job.JobName}** failed", job_embed(job, "Deadline job failed", RED, extra))
 
     def OnJobFinished(self, job):
         if job.JobExtraInfo0:  # File Cache sent from Houdini: it already announced itself
             return
-        self.send(f"✅ **{job.JobName}** terminé ({_duration(job)})", job_embed(job, "Job Deadline terminé", GREEN))
+        self.send(f"✅ **{job.JobName}** finished ({_duration(job)})", job_embed(job, "Deadline job finished", GREEN))
 
     def OnHouseCleaning(self):
         """Once a day after RecapHour: what happened since yesterday evening."""
@@ -138,7 +138,7 @@ class MKEDiscordListener(DeadlineEventListener):
         if not (done or failed or running):
             return
         lines = done + failed + running
-        embed = {"title": f"Récap de la nuit : {len(done)} OK, {len(failed)} en échec, {len(running)} en cours",
+        embed = {"title": f"Night recap: {len(done)} OK, {len(failed)} failed, {len(running)} running",
                  "description": "\n".join(lines)[:3900], "color": RED if failed else GREEN if done else BLUE,
                  "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-        self.send("☀️ Récap Deadline", embed)
+        self.send("☀️ Deadline recap", embed)

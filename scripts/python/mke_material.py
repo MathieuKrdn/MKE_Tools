@@ -66,7 +66,7 @@ def build(folder, name=None, library=None):
     """Create the material. Returns (builder node, {channel: path}, [unused files])."""
     found, unused = classify(folder)
     if not found:
-        raise ValueError("Aucune texture reconnue dans ce dossier.")
+        raise ValueError("No texture recognized in this folder.")
     library = library or material_library()
     name = re.sub(r"[^A-Za-z0-9_]+", "_", name or os.path.basename(os.path.normpath(folder))).strip("_") or "material"
     builder = voptoolutils._setupMtlXBuilderSubnet(destination_node=library, name=name,
@@ -103,10 +103,10 @@ def build(folder, name=None, library=None):
 
 
 def materialFromFolder():
-    """MK Utils > Matériau depuis un dossier de textures."""
+    """MK Utils > Material from Texture Folder."""
     from hutil.Qt import QtWidgets
     start = hou.getenv("JOB") or os.path.expanduser("~")
-    folder = QtWidgets.QFileDialog.getExistingDirectory(hou.qt.mainWindow(), "Dossier de textures", start)
+    folder = QtWidgets.QFileDialog.getExistingDirectory(hou.qt.mainWindow(), "Texture folder", start)
     if not folder:
         return None
     try:
@@ -115,14 +115,14 @@ def materialFromFolder():
         hou.ui.displayMessage(str(error), severity=hou.severityType.Warning)
         return None
     labels = {"base_color": "Base color", "specular_roughness": "Roughness", "metalness": "Metalness", "normal": "Normal",
-              "displacement": "Displacement", "opacity": "Opacity", "emission_color": "Emission", "occlusion": "AO (non branché)"}
+              "displacement": "Displacement", "opacity": "Opacity", "emission_color": "Emission", "occlusion": "AO (not connected)"}
     lines = [f"{labels[c]} : {os.path.basename(p)}" for c, p in found.items()]
     if unused:
-        lines.append(f"\nNon utilisés : {', '.join(unused[:8])}")
+        lines.append(f"\nNot used: {', '.join(unused[:8])}")
     builder.setSelected(True, clear_all_selected=True)
     editor = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
     if editor is not None:
         editor.setCurrentNode(builder)
-    hou.ui.displayMessage(f"Matériau « {builder.name()} » créé dans {builder.parent().path()}\n\n" + "\n".join(lines),
-                          title="Matériau depuis textures")
+    hou.ui.displayMessage(f"Material \"{builder.name()}\" created in {builder.parent().path()}\n\n" + "\n".join(lines),
+                          title="Material from textures")
     return builder

@@ -38,7 +38,7 @@ def deadline_command():
 def run(*args, timeout=60):
     exe = deadline_command()
     if not exe:
-        raise RuntimeError("deadlinecommand introuvable : Deadline n'est pas installé sur ce poste.")
+        raise RuntimeError("deadlinecommand not found: Deadline is not installed on this machine.")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     result = subprocess.run([exe, *map(str, args)], capture_output=True, encoding="utf-8", errors="replace",
                             timeout=timeout, creationflags=flags)  # deadlinecommand speaks UTF-8, not the Windows codepage
@@ -152,7 +152,7 @@ def submit(node, tonight=False, priority=50, pool=None, dependencies=None, info=
     when = night_start() if tonight else None
     deps = dependencies if dependencies is not None else (upstream_jobs(info, node, hip) if info else [])
     pool = pool or ("houdini" if "houdini" in pools() else "none")
-    project = info["name"] if info else "SANS_PROJET"
+    project = info["name"] if info else "NO_PROJECT"
     name = display_name(node)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_root = os.path.join(info["root"], LOG_DIR) if info else os.path.join(tempfile.gettempdir(), "mke_deadline_logs")
@@ -191,7 +191,7 @@ def submit(node, tonight=False, priority=50, pool=None, dependencies=None, info=
     shutil.rmtree(folder, ignore_errors=True)
     job_id = _parse(output).get("JobID")
     if not job_id:
-        raise RuntimeError(f"Deadline a refusé le job :\n{output.strip()[-600:]}")
+        raise RuntimeError(f"Deadline rejected the job:\n{output.strip()[-600:]}")
     entry = {"id": job_id, "name": name, "node": node.path(), "hip": hip, "frames": [start, end], "log": log,
              "output": output_dir(node), "submitted": datetime.datetime.now().isoformat(timespec="seconds"),
              "scheduled": when.isoformat(timespec="minutes") if when else None, "deps": deps}
@@ -231,30 +231,30 @@ def describe(job, now=None):
     started = _date(job.get("StartedDateTimeString"))
     finished = _date(job.get("CompletedDateTimeString"))
     if status is None:
-        return "Terminés", "Introuvable dans Deadline", "#8a8a8a", 0, "job supprimé de Deadline ?"
+        return "Finished", "Not found in Deadline", "#8a8a8a", 0, "job deleted from Deadline?"
     if status == "Failed" or (status == "Active" and int(job.get("FailedChunks", 0) or 0)):
-        return "Terminés", "Erreur", "#d0603f", percent, _last_error(job)
+        return "Finished", "Error", "#d0603f", percent, _last_error(job)
     if status == "Completed":
         took = _duration(finished - started) if started and finished else ""
-        return "Terminés", "Terminé", "#4caf61", 100, took
+        return "Finished", "Finished", "#4caf61", 100, took
     if status == "Suspended":
-        return "En attente", "Suspendu", "#8a8a8a", percent, ""
+        return "Waiting", "Suspended", "#8a8a8a", percent, ""
     if int(job.get("RenderingChunks", 0) or 0):
         elapsed = now - started if started else None
         eta = ""
         if elapsed and 0 < percent < 100:
-            eta = f"  ·  reste ~{_duration(elapsed * (100 - percent) / percent)}"
-        return "En cours", "Calcul", "#4f86c6", percent, (_duration(elapsed) if elapsed else "") + eta
+            eta = f"  ·  ~{_duration(elapsed * (100 - percent) / percent)}"
+        return "Running", "Cooking", "#4f86c6", percent, (_duration(elapsed) if elapsed else "") + eta
     if job.get("scheduled") and datetime.datetime.fromisoformat(job["scheduled"]) > now:
-        return "Ce soir", f"Programmé {job['scheduled'][11:16]}", "#b08cd8", 0, _waiting(job)
+        return "Tonight", f"Scheduled {job['scheduled'][11:16]}", "#b08cd8", 0, _waiting(job)
     if status == "Pending":
-        return "En attente", "Attend un autre job", "#b08cd8", 0, _waiting(job)
-    return "En attente", "En file", "#8a8a8a", 0, _waiting(job)
+        return "Waiting", "Waiting for another job", "#b08cd8", 0, _waiting(job)
+    return "Waiting", "Queued", "#8a8a8a", 0, _waiting(job)
 
 
 def _waiting(job):
     deps = job.get("deps") or []
-    return f"après {len(deps)} job(s)" if deps else ""
+    return f"after {len(deps)} job(s)" if deps else ""
 
 
 def _date(text):
@@ -275,10 +275,10 @@ def _last_error(job):
     try:
         with open(job["log"], encoding="utf-8", errors="replace") as f:
             lines = [l.strip() for l in f if l.strip()]
-        errors = [l for l in lines if "ERREUR" in l or "Error" in l or "error" in l]
-        return (errors or lines or ["voir le log"])[-1][:160]
+        errors = [l for l in lines if "ERROR" in l or "Error" in l or "error" in l]
+        return (errors or lines or ["see the log"])[-1][:160]
     except OSError:
-        return "voir le log dans Deadline Monitor"
+        return "see the log in Deadline Monitor"
 
 
 def start_now(job):
@@ -309,28 +309,28 @@ def submit_from_menu(node, tonight):
     if not can_submit(node):
         return
     if hou.hipFile.isNewFile():
-        hou.ui.displayMessage("Enregistre d'abord la scène : Deadline calcule le fichier .hip tel qu'il est sur le disque.",
+        hou.ui.displayMessage("Save the scene first: Deadline cooks the .hip as it is on disk.",
                               severity=hou.severityType.Warning)
         return
     if hou.hipFile.hasUnsavedChanges():
-        if hou.ui.displayMessage("La scène a des changements non enregistrés. Deadline calcule le fichier sur le disque.",
-                                 buttons=("Enregistrer et envoyer", "Annuler"), default_choice=0, close_choice=1) != 0:
+        if hou.ui.displayMessage("The scene has unsaved changes. Deadline cooks the file on disk.",
+                                 buttons=("Save and send", "Cancel"), default_choice=0, close_choice=1) != 0:
             return
         hou.hipFile.save()
     import mke_check
-    if not mke_check.report(mke_check.check([node]), title=f"Avant l'envoi de {node.name()} à Deadline"):
+    if not mke_check.report(mke_check.check([node]), title=f"Before sending {node.name()} to Deadline"):
         return
     try:
         entry = submit(node, tonight=tonight)
     except Exception as error:
-        hou.ui.displayMessage(f"Envoi à Deadline impossible : {error}", severity=hou.severityType.Error)
+        hou.ui.displayMessage(f"Could not send to Deadline: {error}", severity=hou.severityType.Error)
         return
-    when = f"ce soir à {entry['scheduled'][11:16]}" if entry["scheduled"] else "dès que le worker est libre"
-    deps = f"\nIl attendra la fin de {len(entry['deps'])} job(s) en amont." if entry["deps"] else ""
+    when = f"tonight at {entry['scheduled'][11:16]}" if entry["scheduled"] else "as soon as the worker is free"
+    deps = f"\nIt will wait for {len(entry['deps'])} upstream job(s)." if entry["deps"] else ""
     choice = hou.ui.displayMessage(
-        f"« {entry['name']} » est envoyé à Deadline, calcul {when}.{deps}\n\n"
-        "Le job lira la scène telle qu'elle est enregistrée. Pour continuer à travailler sans la modifier, "
-        "passe sur une nouvelle version.", buttons=("Save Up maintenant", "Rester sur cette version"),
+        f"\"{entry['name']}\" sent to Deadline, cooking {when}.{deps}\n\n"
+        "The job reads the scene as it is saved. To keep working without changing it, "
+        "move to a new version.", buttons=("Save Up now", "Stay on this version"),
         default_choice=0, close_choice=1)
     if choice == 0:
         import saveUp

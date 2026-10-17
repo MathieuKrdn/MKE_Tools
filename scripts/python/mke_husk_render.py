@@ -20,12 +20,12 @@ def main(husk, usd, start, end, inc, output, renderer, log_path):
             log.write(text)
             log.flush()
 
-        out(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  frames {start}-{end} (pas {inc})  {renderer}\n{' '.join(cmd)}\n")
+        out(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  frames {start}-{end} (step {inc})  {renderer}\n{' '.join(cmd)}\n")
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         for line in process.stdout:
             out(line)
         code = process.wait()
-        out(f"=== {'OK' if code == 0 else f'ERREUR : husk a quitté avec le code {code}'}\n")
+        out(f"=== {'OK' if code == 0 else f'ERROR: husk exited with code {code}'}\n")
     return code
 
 

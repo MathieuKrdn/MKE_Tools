@@ -29,13 +29,13 @@ def main(scene, path, start, end, log_path):
     hou.hipFile.load(scene, suppress_save_prompt=True, ignore_load_warnings=True)
     node = hou.node(path)
     if node is None:
-        raise SystemExit(f"ERREUR : node introuvable dans la scène : {path}")
+        raise SystemExit(f"ERROR: node not found in the scene: {path}")
     rop = node.node("render") if node.type().nameComponents()[2] == "filecache" else node
     started = time.time()
     try:
         rop.render(frame_range=(start, end), verbose=True, output_progress=True)
     except hou.OperationFailed as error:
-        print(f"ERREUR : {error}")
+        print(f"ERROR: {error}")
         raise SystemExit(1)
     try:  # outdated-cache detection (the post-render hook may not exist on older nodes)
         import mke_cachestate

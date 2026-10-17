@@ -1,4 +1,4 @@
-"""Scene checker run before sending to Deadline (and from MK Utils > Vérifier la scène).
+"""Scene checker run before sending to Deadline (and from MK Utils > Check Scene).
 
 Each problem is (level, node path or '', message) with level 'error' (the night job would fail or lose data)
 or 'warning' (worth a look). Checks are cheap: no cooking, only parameters and the file system.
@@ -43,7 +43,7 @@ def check(nodes=None):
             continue
         own = [e for e in errors if not e.startswith("Invalid source")]  # skip errors only inherited from inputs
         if own:
-            problems.append(("error", node.path(), f"Node en erreur : {own[0][:160]}"))
+            problems.append(("error", node.path(), f"Node in error: {own[0][:160]}"))
 
     # files read by the scene: missing, or outside the project
     for parm, path in hou.fileReferences():
@@ -64,9 +64,9 @@ def check(nodes=None):
         if not expanded or expanded.startswith(("op:", "opdef:", "oplib:", "temp:")) or _norm(expanded).startswith(hfs):
             continue
         if not FRAME_TOKENS.search(path) and not os.path.exists(expanded):
-            problems.append(("warning", node.path(), f"Fichier introuvable : {expanded}"))
+            problems.append(("warning", node.path(), f"File not found: {expanded}"))
         elif info and not _norm(expanded).startswith(_norm(info["root"])):
-            problems.append(("warning", node.path(), f"Fichier hors du projet (pense à le copier dans IN) : {expanded}"))
+            problems.append(("warning", node.path(), f"File outside the project (copy it into IN): {expanded}"))
 
     # what the nodes will write
     for node in (nodes or []):
@@ -78,7 +78,7 @@ def _check_output(node, info):
     problems = []
     is_cache = node.type().nameComponents()[2] == "filecache"
     if is_cache and node.parm("enableversion") is not None and not node.evalParm("enableversion"):
-        problems.append(("warning", node.path(), "Versions désactivées : le cache écrasera le précédent."))
+        problems.append(("warning", node.path(), "Versions disabled: the cache will overwrite the previous one."))
     folder = ""
     if node.parm("cachedir") is not None:
         folder = node.parm("cachedir").evalAsString()
@@ -87,8 +87,8 @@ def _check_output(node, info):
     if folder and os.path.isdir(folder):
         existing = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
         if existing:
-            problems.append(("warning", node.path(), f"{len(existing)} fichier(s) existent déjà dans {folder} : ils seront écrasés "
-                                                     "(monte la version du cache pour les garder)."))
+            problems.append(("warning", node.path(), f"{len(existing)} file(s) already exist in {folder}: they will be overwritten "
+                                                     "(bump the cache version to keep them)."))
     if folder:
         needed = _previous_version_size(folder)
         drive = folder
@@ -97,15 +97,15 @@ def _check_output(node, info):
         if needed and drive:
             free = shutil.disk_usage(drive).free
             if free < needed * 1.2:
-                problems.append(("error", node.path(), f"Espace disque insuffisant : ~{needed / 1e9:.1f} Go attendus "
-                                                       f"(d'après la version précédente), {free / 1e9:.1f} Go libres."))
+                problems.append(("error", node.path(), f"Not enough disk space: ~{needed / 1e9:.1f} GB expected "
+                                                       f"(from the previous version), {free / 1e9:.1f} GB free."))
     if info and node.parm("f1") is not None and node.parm("trange") is not None and node.evalParm("trange") != 0:
         shot = None if hou.hipFile.isNewFile() else mke_project.shot_for_path(info, hou.hipFile.path())
         if shot:
             start, end = mke_project.shot_range(info, shot)
             f1, f2 = int(node.evalParm("f1")), int(node.evalParm("f2"))
             if (f1, f2) != (start, end):
-                problems.append(("warning", node.path(), f"Frames {f1}-{f2} alors que le plan {shot} fait {start}-{end}."))
+                problems.append(("warning", node.path(), f"Frames {f1}-{f2} while shot {shot} is {start}-{end}."))
     return problems
 
 
@@ -125,7 +125,7 @@ def _previous_version_size(folder):
 
 # ---------------------------------------------------------------- UI
 
-def report(problems, title="Vérification de la scène", allow_continue=True):
+def report(problems, title="Scene check", allow_continue=True):
     """Show the problems. Returns True when the user chooses to go on (always True when nothing was found)."""
     if not problems:
         return True
@@ -133,9 +133,9 @@ def report(problems, title="Vérification de la scène", allow_continue=True):
     lines = [f"{'⛔' if level == 'error' else '⚠'}  {path}\n      {message}" if path else f"⚠  {message}"
              for level, path, message in problems[:25]]
     if len(problems) > 25:
-        lines.append(f"... et {len(problems) - 25} autres")
-    head = f"{errors} erreur(s), {len(problems) - errors} avertissement(s) :\n\n"
-    buttons = ("Envoyer quand même", "Annuler") if allow_continue else ("OK",)
+        lines.append(f"... and {len(problems) - 25} more")
+    head = f"{errors} error(s), {len(problems) - errors} warning(s):\n\n"
+    buttons = ("Send anyway", "Cancel") if allow_continue else ("OK",)
     choice = hou.ui.displayMessage(head + "\n".join(lines), buttons=buttons, default_choice=len(buttons) - 1,
                                    close_choice=len(buttons) - 1, title=title,
                                    severity=hou.severityType.Error if errors else hou.severityType.Warning)
@@ -143,10 +143,10 @@ def report(problems, title="Vérification de la scène", allow_continue=True):
 
 
 def check_selection():
-    """MK Utils > Vérifier la scène: the selected nodes (and upstream), or the whole scene."""
+    """MK Utils > Check Scene: the selected nodes (and upstream), or the whole scene."""
     nodes = list(hou.selectedNodes())
     problems = check(nodes or None)
     if not problems:
-        hou.ui.displayMessage("Rien à signaler.", title="Vérification de la scène")
+        hou.ui.displayMessage("Nothing to report.", title="Scene check")
     else:
         report(problems, allow_continue=False)

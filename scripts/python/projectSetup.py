@@ -14,7 +14,7 @@ from hutil.Qt import QtCore, QtGui, QtWidgets
 
 import mke_project
 
-OTHER = "Autre"
+OTHER = "Other"
 TYPE_STYLE = "padding: 6px 12px;"
 TYPE_CHECKED_STYLE = TYPE_STYLE + "background: #3d6ea8; color: white; border: 1px solid #5b8cc8;"
 STYLE = """
@@ -111,7 +111,7 @@ class VideoPlayer(QtWidgets.QWidget):
         self.time = QtWidgets.QLabel("0:00 / 0:00")
         self.time.setStyleSheet("color: #8a8a8a;")
         self.mute_button = QtWidgets.QToolButton()
-        self.mute_button.setText("Son")
+        self.mute_button.setText("Sound")
         self.mute_button.setCheckable(True)
         self.mute_button.toggled.connect(lambda on: self.audio.setMuted(not on))
 
@@ -157,7 +157,7 @@ class VideoPlayer(QtWidgets.QWidget):
 
     def _on_state(self, *_):
         playing = self.player.playbackState() == QtMultimedia.QMediaPlayer.PlayingState
-        self.play_button.setText("Pause" if playing else "Lecture")
+        self.play_button.setText("Pause" if playing else "Play")
 
     def _on_position(self, position):
         if not self.slider.isSliderDown():
@@ -168,8 +168,8 @@ class VideoPlayer(QtWidgets.QWidget):
 
 def _confirm_discard():
     return not hou.hipFile.hasUnsavedChanges() or hou.ui.displayMessage(
-        "La scène ouverte a des changements non sauvegardés.",
-        buttons=("Continuer", "Annuler"), default_choice=1, close_choice=1) == 0
+        "The open scene has unsaved changes.",
+        buttons=("Continue", "Cancel"), default_choice=1, close_choice=1) == 0
 
 
 def current_project():
@@ -202,11 +202,11 @@ class ProjectsDashboard(QtWidgets.QDialog):
 
         title = _label("Projects", "title")
         self.active = _label("", "hint")
-        self.dock_button = QtWidgets.QPushButton("Ancrer dans Houdini")
-        self.dock_button.setToolTip("Ouvre le dashboard comme un onglet de Houdini (à côté du Network Editor)")
+        self.dock_button = QtWidgets.QPushButton("Dock in Houdini")
+        self.dock_button.setToolTip("Opens the dashboard as a Houdini pane tab (next to the Network Editor)")
         self.dock_button.clicked.connect(lambda: (mke_project.set_pref("dashboard_docked", True), self.dock()))
         self.dock_button.setVisible(not docked)
-        new_project = QtWidgets.QPushButton("+ Nouveau projet")
+        new_project = QtWidgets.QPushButton("+ New project")
         new_project.clicked.connect(self._new_project)
         header = QtWidgets.QHBoxLayout()
         header.addWidget(title)
@@ -220,11 +220,11 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.project_list.setObjectName("projects")
         self.project_list.setTextElideMode(QtCore.Qt.ElideMiddle)
         self.project_list.currentItemChanged.connect(lambda *_: self._refresh_entities())
-        self.empty_projects = _label("Aucun projet récent.\nCrée-en un avec « + Nouveau projet » ou ouvre un dossier avec « Parcourir ».", "hint")
-        browse = QtWidgets.QPushButton("Parcourir...")
+        self.empty_projects = _label("No recent project.\nCreate one with \"+ New project\" or open a folder with \"Browse\".", "hint")
+        browse = QtWidgets.QPushButton("Browse...")
         browse.clicked.connect(self._browse)
-        self.settings_button = QtWidgets.QPushButton("Réglages")
-        self.settings_button.setToolTip("Lire et modifier fps, frames, résolution, dossiers...")
+        self.settings_button = QtWidgets.QPushButton("Settings")
+        self.settings_button.setToolTip("Read and edit fps, frames, resolution, folders...")
         self.settings_button.clicked.connect(self._edit_settings)
         self.project_list.itemDoubleClicked.connect(lambda *_: self._edit_settings())
         self.project_summary = _label("", "hint")
@@ -240,12 +240,12 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.entity_tree.setHeaderHidden(True)
         self.entity_tree.setColumnCount(2)
         self.entity_tree.currentItemChanged.connect(lambda *_: self._refresh_versions())
-        self.entity_button = QtWidgets.QPushButton("+ Plan / asset")
+        self.entity_button = QtWidgets.QPushButton("+ Shot / asset")
         self.entity_button.clicked.connect(self._edit_entities)
 
         # 3. versions
         self.version_list = QtWidgets.QTreeWidget()
-        self.version_list.setHeaderLabels(["Version", "Date", "Auteur", "Commentaire"])
+        self.version_list.setHeaderLabels(["Version", "Date", "Author", "Comment"])
         self.version_list.setRootIsDecorated(False)
         self.version_list.setAlternatingRowColors(True)
         self.version_list.currentItemChanged.connect(lambda *_: self._refresh_thumbnail())
@@ -259,10 +259,10 @@ class ProjectsDashboard(QtWidgets.QDialog):
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.version_list, 1)
         box.addWidget(self.thumbnail)
-        self.new_scene_button = QtWidgets.QPushButton("Nouvelle scène ici")
-        self.new_scene_button.setToolTip("Crée la v0001 de ce plan / asset dans son dossier, avec sa plage de frames")
+        self.new_scene_button = QtWidgets.QPushButton("New scene here")
+        self.new_scene_button.setToolTip("Creates the v0001 of this shot / asset in its folder, with its frame range")
         self.new_scene_button.clicked.connect(self._new_scene)
-        self.open_button = QtWidgets.QPushButton("Ouvrir")
+        self.open_button = QtWidgets.QPushButton("Open")
         self.open_button.setObjectName("primary")
         self.open_button.setDefault(True)
         self.open_button.clicked.connect(self._open_version)
@@ -270,7 +270,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
 
         # 4. media: blasts, renders, image sequences of the selected shot / asset
         self.media_list = QtWidgets.QTreeWidget()
-        self.media_list.setHeaderLabels(["Nom", "Date", "Type", "Infos"])
+        self.media_list.setHeaderLabels(["Name", "Date", "Type", "Info"])
         self.media_list.setRootIsDecorated(False)
         self.media_list.setAlternatingRowColors(True)
         self.media_list.setTextElideMode(QtCore.Qt.ElideMiddle)
@@ -290,42 +290,42 @@ class ProjectsDashboard(QtWidgets.QDialog):
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.media_list, 1)
         box.addWidget(self.preview_stack)
-        folder_button = QtWidgets.QPushButton("Ouvrir le dossier")
+        folder_button = QtWidgets.QPushButton("Open folder")
         folder_button.clicked.connect(self._open_media_folder)
         daily_button = QtWidgets.QPushButton("+ Daily flipbook")
-        daily_button.setToolTip("Flipbook du viewport en mp4, nommé selon la convention du projet")
+        daily_button.setToolTip("Viewport flipbook to mp4, named with the project convention")
         daily_button.clicked.connect(self._daily)
-        self.play_button = QtWidgets.QPushButton("Ouvrir dans le lecteur")
-        self.play_button.setToolTip("Vidéos : ton lecteur vidéo. Séquences : MPlay.")
+        self.play_button = QtWidgets.QPushButton("Open in player")
+        self.play_button.setToolTip("Videos: your video player. Sequences: MPlay.")
         self.play_button.setObjectName("primary")
         self.play_button.clicked.connect(self._play_media)
         media_page = _column("", media_box, folder_button, daily_button, None, self.play_button)
 
         self.content_tabs = QtWidgets.QTabWidget()
         self.content_tabs.addTab(versions_page, "Versions")
-        self.content_tabs.addTab(media_page, "Médias")
+        self.content_tabs.addTab(media_page, "Media")
         self.notes_panel = NotesPanel(self._on_notes_changed)
         self.time_panel = TimePanel()
         self.disk_panel = DiskPanel()
         self.content_tabs.addTab(self.notes_panel, "Notes")
-        self.content_tabs.addTab(self.time_panel, "Temps")
-        self.content_tabs.addTab(self.disk_panel, "Disque")
+        self.content_tabs.addTab(self.time_panel, "Time")
+        self.content_tabs.addTab(self.disk_panel, "Disk")
         self.queue_panel = QueuePanel()
-        self.content_tabs.addTab(self.queue_panel, "File")
+        self.content_tabs.addTab(self.queue_panel, "Queue")
         self.content_tabs.currentChanged.connect(lambda *_: (self._refresh_media(), self._refresh_panels()))
 
         splitter = QtWidgets.QSplitter()
-        splitter.addWidget(_column("Projets", projects_box, browse, self.settings_button))
-        splitter.addWidget(_column("Plans et assets", self.entity_tree, self.entity_button))
+        splitter.addWidget(_column("Projects", projects_box, browse, self.settings_button))
+        splitter.addWidget(_column("Shots and assets", self.entity_tree, self.entity_button))
         splitter.addWidget(self.content_tabs)
         splitter.setSizes([260, 240, 600])
 
-        self.startup_check = QtWidgets.QCheckBox("Ouvrir au démarrage de Houdini")
+        self.startup_check = QtWidgets.QCheckBox("Open when Houdini starts")
         self.startup_check.setChecked(mke_project.get_pref("open_at_startup", True))
         self.startup_check.toggled.connect(lambda on: mke_project.set_pref("open_at_startup", on))
 
-        self.autosave_check = QtWidgets.QCheckBox(f"Sauvegarde auto toutes les {mke_project.AUTOSAVE_MINUTES} min")
-        self.autosave_check.setToolTip("Copie dans autosave/<scène>_autosave.hip, sans toucher à ta scène ni à ses versions")
+        self.autosave_check = QtWidgets.QCheckBox(f"Autosave every {mke_project.AUTOSAVE_MINUTES} min")
+        self.autosave_check.setToolTip("Copy to autosave/<scene>_autosave.hip, without touching your scene or its versions")
         self.autosave_check.setChecked(mke_project.get_pref("autosave", True))
         self.autosave_check.toggled.connect(mke_project.set_autosave)
         options = QtWidgets.QHBoxLayout()
@@ -343,7 +343,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
     # ---------------------------------------------------------------- data
     def refresh(self, select=None):
         active = current_project()
-        self.active.setText(f"Projet actif : {active['name']}  ·  {active['type']}" if active else "Aucun projet actif")
+        self.active.setText(f"Active project: {active['name']}  ·  {active['type']}" if active else "No active project")
         roots = mke_project.recent_projects()
         if active and active["root"] not in roots:
             roots.insert(0, active["root"])
@@ -353,7 +353,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
         for root in roots:
             info = mke_project.read_project(root)
             shots, assets = len(info["shots"]), len(info["assets"])
-            item = QtWidgets.QListWidgetItem(f"{info['name']}\n{info['type']}  ·  {shots} plans  ·  {assets} assets")
+            item = QtWidgets.QListWidgetItem(f"{info['name']}\n{info['type']}  ·  {shots} shots  ·  {assets} assets")
             item.setData(QtCore.Qt.UserRole, root)
             item.setToolTip(root)
             font = item.font()
@@ -379,14 +379,14 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.settings_button.setEnabled(bool(info))
         self.project_summary.setText(
             f"{info['fps']:g} fps  ·  frames {info['frame_start']}-{info['frame_end']}  ·  "
-            f"{info['resolution'][0]}x{info['resolution'][1]}\nscènes : {mke_project.scenes_dir(info) or '(racine)'}"
-            f"  ·  cache : {info['cache']}" if info else "")
+            f"{info['resolution'][0]}x{info['resolution'][1]}\nscenes: {mke_project.scenes_dir(info) or '(racine)'}"
+            f"  ·  cache: {info['cache']}" if info else "")
         if info:
             statuses = mke_tracking.all_statuses(info)
-            project = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Scènes du projet"])
+            project = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Project scenes"])
             project.setData(0, QtCore.Qt.UserRole, ("project", {}))
             _status_item(project, info, mke_tracking.PROJECT_KEY, statuses)
-            shots = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Plans"])
+            shots = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Shots"])
             sequences = {}
             for entry in info["shots"]:
                 seq, shot = entry.split("/")
@@ -468,7 +468,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
             _status_item(item, info, key, mke_tracking.all_statuses(info))
 
     def _refresh_media(self):
-        """Scan media only while the Médias tab is shown: OUT folders can be large."""
+        """Scan media only while the Media tab is shown: OUT folders can be large."""
         if self.content_tabs.currentIndex() != 1:
             return
         self.media_list.clear()
@@ -495,7 +495,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
     def _refresh_media_preview(self):
         media = self.selected_media()
         if self.video_player:
-            if media and media["kind"] == "Vidéo":
+            if media and media["kind"] == "Video":
                 self.preview_stack.setCurrentWidget(self.video_player)
                 self.video_player.load(media["path"])
                 return
@@ -505,8 +505,8 @@ class ProjectsDashboard(QtWidgets.QDialog):
         pixmap = QtGui.QPixmap(first) if first.lower().endswith((".png", ".jpg", ".jpeg")) else QtGui.QPixmap()
         if pixmap.isNull():
             self.media_preview.setPixmap(QtGui.QPixmap())
-            self.media_preview.setText("Double-clic pour lire" if media else
-                                       "Aucun média : « + Daily flipbook » en crée un depuis le viewport")
+            self.media_preview.setText("Double-click to play" if media else
+                                       "No media: \"+ Daily flipbook\" makes one from the viewport")
         else:
             self.media_preview.setPixmap(pixmap.scaled(500, 280, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
 
@@ -531,7 +531,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
         media = self.selected_media()
         if not media:
             return
-        if media["kind"] == "Séquence":
+        if media["kind"] == "Sequence":
             mplay = os.path.join(hou.getenv("HFS"), "bin", "mplay")
             subprocess.Popen([mplay, media["mplay"]])
         else:
@@ -554,23 +554,23 @@ class ProjectsDashboard(QtWidgets.QDialog):
         pixmap = QtGui.QPixmap(thumb) if thumb else QtGui.QPixmap()
         if pixmap.isNull():
             self.thumbnail.setPixmap(QtGui.QPixmap())
-            self.thumbnail.setText("Pas d'aperçu (il sera pris au prochain Save Up)" if item else
-                                   "Pas encore de scène ici : « Nouvelle scène ici » crée la v0001" if self.selected_entity() else "")
+            self.thumbnail.setText("No preview (taken at the next Save Up)" if item else
+                                   "No scene here yet: \"New scene here\" creates the v0001" if self.selected_entity() else "")
         else:
             self.thumbnail.setPixmap(pixmap.scaled(356, 200, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
 
     # ---------------------------------------------------------------- actions
     def _browse(self):
-        path = QtWidgets.QFileDialog.getExistingDirectory(self, "Dossier d'un projet MKE")
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, "MKE project folder")
         if not path:
             return
         info = mke_project.find_project(path)
         if not info:
             scenes = mke_project.detect_scenes_dir(path) or "(racine)"
             if hou.ui.displayMessage(
-                    f"Ce dossier n'est pas encore dans le pipeline.\n\nL'ajouter ? Rien n'est déplacé : seul "
-                    f"PIPELINE/project.json est créé.\nScènes détectées dans : {scenes}",
-                    buttons=("Ajouter", "Annuler"), close_choice=1) == 1:
+                    f"This folder is not in the pipeline yet.\n\nAdd it? Nothing is moved: only "
+                    f"PIPELINE/project.json is created.\nScenes found in: {scenes}",
+                    buttons=("Add", "Cancel"), close_choice=1) == 1:
                 return
             presets = mke_project.load_presets()
             info = mke_project.adopt_project(path, "FX", mke_project.preset_settings(presets, "FX"))
@@ -603,7 +603,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
         version = item.data(0, QtCore.Qt.UserRole)
         mke_project.open_scene(version["path"])
         self.accept()
-        hou.ui.setStatusMessage(f"{version['file']} ouvert")
+        hou.ui.setStatusMessage(f"{version['file']} opened")
 
     def _new_scene(self):
         info, entity = self.selected_project(), self.selected_entity()
@@ -611,14 +611,14 @@ class ProjectsDashboard(QtWidgets.QDialog):
             return
         hip = mke_project.new_entity_scene(info, entity[0], **entity[1])
         self.accept()
-        hou.ui.setStatusMessage(f"Nouvelle scène : {os.path.basename(hip)}")
+        hou.ui.setStatusMessage(f"New scene: {os.path.basename(hip)}")
 
 
 # ==================================================================== project settings
 
 FPS_PRESETS = ["23.976", "24", "25", "29.97", "30", "48", "50", "59.94", "60"]
 RESOLUTION_PRESETS = [("HD 720", 1280, 720), ("Full HD", 1920, 1080), ("2K DCI", 2048, 1080),
-                      ("UHD 4K", 3840, 2160), ("Carré", 1080, 1080), ("Vertical", 1080, 1920)]
+                      ("UHD 4K", 3840, 2160), ("Square", 1080, 1080), ("Vertical", 1080, 1920)]
 CARD_STYLE = "QFrame#card { background: rgba(255, 255, 255, 10); border: 1px solid rgba(255, 255, 255, 22); border-radius: 6px; }"
 
 
@@ -673,7 +673,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
     def __init__(self, info, parent=None):
         super().__init__(parent)
         self.info = info
-        self.setWindowTitle(f"Réglages  ·  {info['name']}")
+        self.setWindowTitle(f"Settings  ·  {info['name']}")
         self.setStyleSheet(STYLE)
         self.setMinimumWidth(560)
         presets = mke_project.load_presets()
@@ -682,10 +682,10 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         self.name_input = QtWidgets.QLineEdit(info["name"])
         self.name_input.setStyleSheet("font-size: 14pt; font-weight: bold; padding: 4px;")
         root = info["root"] if len(info["root"]) < 50 else ".../" + "/".join(info["root"].split("/")[-2:])
-        where = _label(f"{root}  ·  créé le {info.get('created', '?')} par {info.get('author', '?')}", "hint")
+        where = _label(f"{root}  ·  created on {info.get('created', '?')} by {info.get('author', '?')}", "hint")
         where.setToolTip(info["root"])
         open_folder = QtWidgets.QToolButton()
-        open_folder.setText("Ouvrir le dossier")
+        open_folder.setText("Open folder")
         open_folder.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(info["root"])))
 
         # identity
@@ -723,7 +723,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         self.res_preset = QtWidgets.QComboBox()
         for label, w, h in RESOLUTION_PRESETS:
             self.res_preset.addItem(f"{label}  ({w}x{h})", (w, h))
-        self.res_preset.addItem("Personnalisée", None)
+        self.res_preset.addItem("Custom", None)
         self.res_x = _compact_spin(16, 16384, info["resolution"][0])
         self.res_y = _compact_spin(16, 16384, info["resolution"][1])
         self.aspect = _label("", "hint")
@@ -731,38 +731,38 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
 
         # folders
         self.scenes_input = QtWidgets.QLineEdit(mke_project.scenes_dir(info))
-        self.scenes_input.setPlaceholderText("racine du projet")
-        self.scenes_input.setToolTip("Relatif au projet. Rien n'est déplacé : seul l'endroit où chercher les scènes change.")
+        self.scenes_input.setPlaceholderText("project root")
+        self.scenes_input.setToolTip("Relative to the project. Nothing is moved: only where scenes are looked up changes.")
         self.cache_input = QtWidgets.QLineEdit(info["cache"])
-        self.cache_input.setToolTip("Relatif au projet ou chemin absolu. Devient $CACHE.")
+        self.cache_input.setToolTip("Relative to the project or absolute. Becomes $CACHE.")
         self.ocio_input = QtWidgets.QLineEdit(info.get("ocio", ""))
-        self.ocio_input.setPlaceholderText("vide = config OCIO de Houdini")
+        self.ocio_input.setPlaceholderText("empty = Houdini's OCIO config")
 
         content = QtWidgets.QVBoxLayout()
         content.setSpacing(10)
         content.addWidget(_card("Type", [("", type_row)]))
-        content.addWidget(_card("Temps", [
-            ("Images / s", _row(self.fps, None)),
+        content.addWidget(_card("Time", [
+            ("Frames / s", _row(self.fps, None)),
             ("Frames", _row(self.start, "→", self.end, None, self.duration)),
         ]))
         content.addWidget(_card("Image", [
             ("Format", _row(self.res_preset, None)),
-            ("Résolution", _row(self.res_x, "×", self.res_y, None, self.aspect)),
+            ("Resolution", _row(self.res_x, "×", self.res_y, None, self.aspect)),
         ]))
-        content.addWidget(_card("Dossiers", [
-            ("Scènes", self._folder_field(self.scenes_input, relative=True)),
+        content.addWidget(_card("Folders", [
+            ("Scenes", self._folder_field(self.scenes_input, relative=True)),
             ("Cache", self._folder_field(self.cache_input, relative=True)),
             ("OCIO", self._file_field(self.ocio_input)),
         ]))
 
-        self.apply_check = QtWidgets.QCheckBox("Appliquer à la scène ouverte")
+        self.apply_check = QtWidgets.QCheckBox("Apply to the open scene")
         active = current_project()
         self.apply_check.setVisible(bool(active and active["root"] == info["root"]))
         self.apply_check.setChecked(True)
         self.error = _label("", "warning")
-        cancel = QtWidgets.QPushButton("Annuler")
+        cancel = QtWidgets.QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
-        self.save_button = QtWidgets.QPushButton("Enregistrer")
+        self.save_button = QtWidgets.QPushButton("Save")
         self.save_button.setObjectName("primary")
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self._save)
@@ -793,7 +793,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
     def _folder_field(self, line_edit, relative):
         def browse():
             start = os.path.join(self.info["root"], line_edit.text())
-            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choisir un dossier", start)
+            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose a folder", start)
             if path:
                 rel = os.path.relpath(path, self.info["root"]).replace("\\", "/")
                 line_edit.setText("" if rel == "." else rel if relative and not rel.startswith("..") else path.replace("\\", "/"))
@@ -809,7 +809,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
     def _with_buttons(self, line_edit, browse):
         button = QtWidgets.QToolButton()
         button.setText("...")
-        button.setToolTip("Parcourir")
+        button.setToolTip("Browse")
         button.clicked.connect(browse)
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(4)
@@ -848,14 +848,14 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
 
         errors = []
         if not mke_project.sanitize_name(self.name_input.text()):
-            errors.append("Le nom ne peut pas être vide.")
+            errors.append("The name cannot be empty.")
         if fps <= 0:
-            errors.append("Images / s invalide.")
+            errors.append("Invalid frames per second.")
         if frames <= 0:
-            errors.append("La dernière frame doit être après la première.")
+            errors.append("The last frame must be after the first one.")
         scenes = self.scenes_input.text().strip().replace("\\", "/").strip("/")
         if not os.path.isdir(os.path.join(self.info["root"], scenes)):
-            errors.append(f"Le dossier de scènes « {scenes} » n'existe pas dans le projet.")
+            errors.append(f"The scenes folder \"{scenes}\" does not exist in the project.")
         self.error.setText("\n".join(errors))
         self.error.setVisible(bool(errors))
         self.save_button.setEnabled(not errors and self._values() != self._initial)
@@ -876,7 +876,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         if self.apply_check.isVisible() and self.apply_check.isChecked():
             mke_project.apply_to_scene(self.info)
         self.accept()
-        hou.ui.setStatusMessage(f"Réglages de {self.info['name']} enregistrés")
+        hou.ui.setStatusMessage(f"Settings of {self.info['name']} saved")
 
 
 # ==================================================================== dashboard panels: notes, time, disk
@@ -891,7 +891,7 @@ def _status_item(item, info, key, statuses):
     count = mke_tracking.open_count(info, key)
     item.setText(1, "●" + (f" {count}" if count else ""))
     item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
-    item.setToolTip(1, f"{label}" + (f", {count} note(s) ouverte(s)" if count else ""))
+    item.setToolTip(1, f"{label}" + (f", {count} open note(s)" if count else ""))
 
 
 class NotesPanel(QtWidgets.QWidget):
@@ -923,18 +923,18 @@ class NotesPanel(QtWidgets.QWidget):
         self.notes.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.notes.customContextMenuRequested.connect(self._menu)
         self.input = QtWidgets.QLineEdit()
-        self.input.setPlaceholderText("Ajouter une note ou une tâche, Entrée pour valider")
+        self.input.setPlaceholderText("Add a note or a task, Enter to confirm")
         self.input.returnPressed.connect(lambda: self._add(False))
-        self.client = QtWidgets.QPushButton("Retour client")
-        self.client.setToolTip("Ajoute le texte comme retour client (marqué en orange)")
+        self.client = QtWidgets.QPushButton("Client feedback")
+        self.client.setToolTip("Adds the text as client feedback (shown in orange)")
         self.client.clicked.connect(lambda: self._add(True))
         self.empty = _label("", "hint")
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(_section("Statut"))
+        layout.addWidget(_section("Status"))
         layout.addLayout(status_row)
-        layout.addWidget(_section("Notes et retours"))
+        layout.addWidget(_section("Notes and feedback"))
         layout.addWidget(self.notes, 1)
         layout.addWidget(self.empty)
         layout.addLayout(_row(self.input, self.client))
@@ -963,7 +963,7 @@ class NotesPanel(QtWidgets.QWidget):
                 item.setForeground(QtGui.QBrush(QtGui.QColor(mke_tracking.STATUS["retours"][1])))
             self.notes.addItem(item)
         self.notes.blockSignals(False)
-        self.empty.setText("" if data["notes"] else f"Aucune note pour {mke_tracking.key_label(key)}.")
+        self.empty.setText("" if data["notes"] else f"No note for {mke_tracking.key_label(key)}.")
         self.empty.setVisible(not data["notes"])
 
     def _set_status(self, button):
@@ -990,7 +990,7 @@ class NotesPanel(QtWidgets.QWidget):
         if item is None:
             return
         menu = QtWidgets.QMenu(self)
-        delete = menu.addAction("Supprimer la note")
+        delete = menu.addAction("Delete note")
         if menu.exec_(self.notes.mapToGlobal(position)) == delete:
             mke_tracking.delete_note(self.info, self.key, item.data(QtCore.Qt.UserRole))
             self.refresh(self.info, self.key)
@@ -1007,15 +1007,15 @@ class TimePanel(QtWidgets.QWidget):
         for value in (self.today, self.week, self.total):
             value.setWordWrap(False)
         cards = QtWidgets.QHBoxLayout()
-        for title, value in (("Aujourd'hui", self.today), ("Cette semaine", self.week), ("Total projet", self.total)):
+        for title, value in (("Today", self.today), ("This week", self.week), ("Project total", self.total)):
             cards.addWidget(_card(title, [("", value)]))
         self.table = QtWidgets.QTreeWidget()
-        self.table.setHeaderLabels(["Jour / plan", "Temps"])
+        self.table.setHeaderLabels(["Day / shot", "Time"])
         self.table.setAlternatingRowColors(True)
-        export = QtWidgets.QPushButton("Exporter en CSV (factures)")
+        export = QtWidgets.QPushButton("Export CSV (invoices)")
         export.clicked.connect(self._export)
-        hint = _label(f"Compté automatiquement tant que tu utilises Houdini sur une scène du projet. "
-                      f"Après {mke_tracking.IDLE_SECONDS // 60} min sans activité, le compteur s'arrête.", "hint")
+        hint = _label(f"Counted automatically while you use Houdini on a project scene. "
+                      f"After {mke_tracking.IDLE_SECONDS // 60} min without activity, the counter stops.", "hint")
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(cards)
@@ -1033,7 +1033,7 @@ class TimePanel(QtWidgets.QWidget):
         self.week.setText(mke_tracking.hours(summary["week"]))
         self.total.setText(mke_tracking.hours(summary["total"]))
         for day, seconds, per_key in summary["days"]:
-            day_name = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche")[day.weekday()]
+            day_name = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[day.weekday()]
             day_item = QtWidgets.QTreeWidgetItem(self.table, [f"{day_name} {day:%d/%m/%Y}", mke_tracking.hours(seconds)])
             for key, value in sorted(per_key.items(), key=lambda kv: -kv[1]):
                 QtWidgets.QTreeWidgetItem(day_item, [mke_tracking.key_label(key), mke_tracking.hours(value)])
@@ -1045,7 +1045,7 @@ class TimePanel(QtWidgets.QWidget):
         if not self.info:
             return
         default = os.path.join(self.info["root"], "PIPELINE", f"temps_{self.info['name']}_{datetime.date.today():%Y%m%d}.csv")
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exporter le temps", default, "CSV (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export time", default, "CSV (*.csv)")
         if path:
             mke_tracking.export_csv(self.info, path)
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
@@ -1069,34 +1069,34 @@ class DiskPanel(QtWidgets.QWidget):
         self.info = None
         self.caches = {}
         self.nodes = {}
-        self.summary = _label("Clique « Analyser » pour mesurer les caches du projet.", "hint")
+        self.summary = _label("Click \"Analyze\" to measure the project's caches.", "hint")
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Cache / version", "Taille", "Modifié", "Node (scène ouverte)"])
+        self.tree.setHeaderLabels(["Cache / version", "Size", "Modified", "Node (open scene)"])
         self.tree.setAlternatingRowColors(True)
         self.tree.itemChanged.connect(lambda *_: self._refresh_selection())
         self.tree.itemDoubleClicked.connect(self._double_click)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
-        self.tree.setToolTip("Double-clic : ouvrir dans l'explorateur, ou sur la colonne Node : aller au node.\n"
-                             "Clic droit : plus d'options.")
-        analyse = QtWidgets.QPushButton("Analyser")
+        self.tree.setToolTip("Double-click: open in Explorer, or on the Node column: go to the node.\n"
+                             "Right-click: more options.")
+        analyse = QtWidgets.QPushButton("Analyze")
         analyse.clicked.connect(self.scan)
         self.keep = QtWidgets.QSpinBox()
         self.keep.setRange(1, 20)
         self.keep.setValue(2)
-        self.keep.setPrefix("garder ")
-        self.keep.setSuffix(" dernières")
-        select_old = QtWidgets.QPushButton("Cocher les anciennes")
+        self.keep.setPrefix("keep ")
+        self.keep.setSuffix(" latest")
+        select_old = QtWidgets.QPushButton("Check older ones")
         select_old.clicked.connect(self._select_old)
-        self.delete_button = QtWidgets.QPushButton("Corbeille")
+        self.delete_button = QtWidgets.QPushButton("Recycle Bin")
         self.delete_button.setObjectName("primary")
         self.delete_button.clicked.connect(self._delete)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.summary)
         layout.addWidget(self.tree, 1)
-        archive = QtWidgets.QPushButton("Archiver le projet...")
-        archive.setToolTip("Fin de mission : un zip avec scènes, sources et dailies, sans les caches")
+        archive = QtWidgets.QPushButton("Archive project...")
+        archive.setToolTip("End of job: a zip with scenes, sources and dailies, without caches")
         archive.clicked.connect(lambda: self.info and ArchiveDialog(self.info, self).exec_())
         layout.addLayout(_row(analyse, archive, None, self.keep, select_old, self.delete_button))
         self._refresh_selection()
@@ -1105,14 +1105,14 @@ class DiskPanel(QtWidgets.QWidget):
         if info is not self.info and (not info or not self.info or info["root"] != self.info["root"]):
             self.caches = {}
             self.tree.clear()
-            self.summary.setText("Clique « Analyser » pour mesurer les caches du projet.")
+            self.summary.setText("Click \"Analyze\" to measure the project's caches.")
         self.info = info
         self._refresh_selection()
 
     def scan(self):
         if not self.info:
             return
-        self.summary.setText("Analyse en cours...")
+        self.summary.setText("Analyzing...")
         QtWidgets.QApplication.processEvents()
         self.caches = mke_tracking.scan_caches(self.info, progress=lambda _: QtWidgets.QApplication.processEvents())
         self.tree.blockSignals(True)
@@ -1132,7 +1132,7 @@ class DiskPanel(QtWidgets.QWidget):
         self._fill_nodes()
         self.tree.blockSignals(False)
         self.tree.resizeColumnToContents(0)
-        self.summary.setText(f"{mke_tracking.human(total)} de caches dans {len(self.caches)} dossiers de cache.")
+        self.summary.setText(f"{mke_tracking.human(total)} of caches in {len(self.caches)} cache folders.")
         self._refresh_selection()
 
     def _fill_nodes(self):
@@ -1145,7 +1145,7 @@ class DiskPanel(QtWidgets.QWidget):
             if nodes:
                 item.setText(3, nodes[0].path() + (f"  (+{len(nodes) - 1})" if len(nodes) > 1 else ""))
                 item.setForeground(3, link)
-                item.setToolTip(3, "\n".join(n.path() for n in nodes) + "\nDouble-clic pour aller au node")
+                item.setToolTip(3, "\n".join(n.path() for n in nodes) + "\nDouble-click to go to the node")
 
     def _nodes_for(self, item):
         while item is not None and item.parent() is not None:
@@ -1170,18 +1170,18 @@ class DiskPanel(QtWidgets.QWidget):
         if not path:
             return
         menu = QtWidgets.QMenu(self)
-        explore = menu.addAction("Ouvrir dans l'explorateur")
-        copy = menu.addAction("Copier le chemin")
+        explore = menu.addAction("Open in Explorer")
+        copy = menu.addAction("Copy path")
         node_actions = {}
         nodes = self._nodes_for(item)
         if nodes:
             menu.addSeparator()
             for node in nodes:
-                node_actions[menu.addAction(f"Aller au node  {node.path()}")] = node
+                node_actions[menu.addAction(f"Go to node  {node.path()}")] = node
         else:
-            menu.addAction("Aucun node de la scène ouverte n'écrit ici").setEnabled(False)
+            menu.addAction("No node of the open scene writes here").setEnabled(False)
         menu.addSeparator()
-        trash = menu.addAction("Mettre à la corbeille...") if item.data(0, QtCore.Qt.UserRole) else None
+        trash = menu.addAction("Move to Recycle Bin...") if item.data(0, QtCore.Qt.UserRole) else None
         choice = menu.exec_(self.tree.viewport().mapToGlobal(position))
         if choice in node_actions:
             mke_tracking.show_node(node_actions[choice])
@@ -1190,7 +1190,7 @@ class DiskPanel(QtWidgets.QWidget):
             reveal(path)
         elif choice == copy:
             QtWidgets.QApplication.clipboard().setText(os.path.normpath(path))
-            hou.ui.setStatusMessage(f"Copié : {os.path.normpath(path)}")
+            hou.ui.setStatusMessage(f"Copied: {os.path.normpath(path)}")
         elif trash is not None and choice == trash:
             self._delete([item.data(0, QtCore.Qt.UserRole)])
 
@@ -1220,8 +1220,8 @@ class DiskPanel(QtWidgets.QWidget):
         selection = self.checked() if self.tree.topLevelItemCount() else []
         size = sum(v["size"] for v in selection)
         self.delete_button.setEnabled(bool(selection))
-        self.delete_button.setText(f"Corbeille ({mke_tracking.human(size)})" if selection else "Corbeille")
-        self.delete_button.setToolTip("Envoie les versions cochées dans la Corbeille de Windows (récupérables)")
+        self.delete_button.setText(f"Recycle Bin ({mke_tracking.human(size)})" if selection else "Recycle Bin")
+        self.delete_button.setToolTip("Sends the checked versions to the Windows Recycle Bin (recoverable)")
 
     def _delete(self, selection=None):
         selection = selection or self.checked()
@@ -1229,10 +1229,10 @@ class DiskPanel(QtWidgets.QWidget):
             return
         size = mke_tracking.human(sum(v["size"] for v in selection))
         listing = "\n".join(os.path.relpath(v["path"], self.info["root"]) for v in selection[:12])
-        more = f"\n... et {len(selection) - 12} autres" if len(selection) > 12 else ""
-        if hou.ui.displayMessage(f"Mettre {len(selection)} versions ({size}) à la corbeille ?\n\n{listing}{more}\n\n"
-                                 "Tu pourras les restaurer depuis la Corbeille de Windows.",
-                                 buttons=("Mettre à la corbeille", "Annuler"), default_choice=1, close_choice=1) != 0:
+        more = f"\n... and {len(selection) - 12} more" if len(selection) > 12 else ""
+        if hou.ui.displayMessage(f"Move {len(selection)} versions ({size}) to the Recycle Bin?\n\n{listing}{more}\n\n"
+                                 "You can restore them from the Windows Recycle Bin.",
+                                 buttons=("Move to Recycle Bin", "Cancel"), default_choice=1, close_choice=1) != 0:
             return
         try:
             mke_tracking.recycle([v["path"] for v in selection])
@@ -1244,7 +1244,7 @@ class DiskPanel(QtWidgets.QWidget):
 class QueuePanel(QtWidgets.QWidget):
     """Deadline jobs sent from this project: tonight's queue, running, finished, errors."""
 
-    GROUPS = ("En cours", "Ce soir", "En attente", "Terminés")
+    GROUPS = ("Running", "Tonight", "Waiting", "Finished")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1253,7 +1253,7 @@ class QueuePanel(QtWidgets.QWidget):
         self.info = None
         self.counters = {}
         cards = QtWidgets.QHBoxLayout()
-        for title, color in (("En cours", "#4f86c6"), ("Ce soir", "#b08cd8"), ("Terminés", "#4caf61"), ("Erreurs", "#d0603f")):
+        for title, color in (("Running", "#4f86c6"), ("Tonight", "#b08cd8"), ("Finished", "#4caf61"), ("Errors", "#d0603f")):
             value = _label("0", "title")
             value.setWordWrap(False)
             value.setStyleSheet(f"color: {color}; font-size: 18pt; font-weight: bold;")
@@ -1265,20 +1265,20 @@ class QueuePanel(QtWidgets.QWidget):
         self.night.setFixedWidth(80)
         self.night.timeChanged.connect(lambda t: mke_project.set_pref("night_start", t.toString("HH:mm")))
         self.worker = _label("", "hint")
-        refresh = QtWidgets.QPushButton("Actualiser")
+        refresh = QtWidgets.QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_jobs)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Job", "État", "Progression", "Frames", "Temps"])
+        self.tree.setHeaderLabels(["Job", "State", "Progress", "Frames", "Time"])
         self.tree.setAlternatingRowColors(True)
         self.tree.currentItemChanged.connect(lambda *_: self._refresh_detail())
         self.tree.itemDoubleClicked.connect(lambda *_: self._go_to_node())
         self.detail = _label("", "hint")
-        self.empty = _label("Aucun job. Clic droit sur un File Cache > « Deadline : calculer ce soir ».", "hint")
+        self.empty = _label("No job. Right-click a File Cache > \"Deadline: cache tonight\".", "hint")
 
         self.buttons = {}
-        for key, text in (("node", "Aller au node"), ("log", "Ouvrir le log"), ("folder", "Dossier de sortie"),
-                          ("now", "Lancer maintenant"), ("pause", "Suspendre"), ("requeue", "Relancer"), ("forget", "Retirer")):
+        for key, text in (("node", "Go to node"), ("log", "Open log"), ("folder", "Output folder"),
+                          ("now", "Start now"), ("pause", "Suspend"), ("requeue", "Requeue"), ("forget", "Remove")):
             self.buttons[key] = QtWidgets.QPushButton(text)
         self.buttons["requeue"].setObjectName("primary")
         self.buttons["node"].clicked.connect(self._go_to_node)
@@ -1288,13 +1288,13 @@ class QueuePanel(QtWidgets.QWidget):
         self.buttons["requeue"].clicked.connect(lambda: self._act("requeue"))
         self.buttons["forget"].clicked.connect(self._forget)
         self.buttons["now"].clicked.connect(self._start_now)
-        self.buttons["now"].setToolTip("Annule l'horaire du soir : le job part dès que le worker est libre")
-        self.buttons["forget"].setToolTip("Retire le job de cette liste (il reste dans Deadline)")
+        self.buttons["now"].setToolTip("Cancels the night schedule: the job starts as soon as the worker is free")
+        self.buttons["forget"].setToolTip("Removes the job from this list (it stays in Deadline)")
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(cards)
-        layout.addLayout(_row("Lancer la file de nuit à", self.night, None, self.worker, refresh))
+        layout.addLayout(_row("Start the night queue at", self.night, None, self.worker, refresh))
         layout.addWidget(self.tree, 1)
         layout.addWidget(self.empty)
         layout.addWidget(self.detail)
@@ -1313,22 +1313,22 @@ class QueuePanel(QtWidgets.QWidget):
     def refresh_jobs(self):
         selected = self._job()["id"] if self._job() else None
         self.tree.clear()
-        counts = dict.fromkeys(("En cours", "Ce soir", "Terminés", "Erreurs"), 0)
+        counts = dict.fromkeys(("Running", "Tonight", "Finished", "Errors"), 0)
         jobs = self.dl.job_states(self.info) if self.info else []
         groups, selected_item, bars = {}, None, []
         for job in sorted(jobs, key=lambda j: j["submitted"], reverse=True):
             group, label, color, percent, timing = self.dl.describe(job)
-            if group == "Terminés" and job.get("Status") == "Completed" and \
+            if group == "Finished" and job.get("Status") == "Completed" and \
                     datetime.datetime.fromisoformat(job["submitted"]) < datetime.datetime.now() - datetime.timedelta(days=7):
                 continue  # keep a week of history
-            counts["Erreurs" if label == "Erreur" else group if group in counts else "Ce soir"] += 1
+            counts["Errors" if label == "Error" else group if group in counts else "Tonight"] += 1
             if group not in groups:
                 groups[group] = QtWidgets.QTreeWidgetItem([group])
                 font = groups[group].font(0); font.setBold(True); groups[group].setFont(0, font)
             item = QtWidgets.QTreeWidgetItem(groups[group], [job["name"], f"● {label}", "",
                                                              f"{job['frames'][0]}-{job['frames'][1]}", timing])
             item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
-            item.setToolTip(0, f"{job['node']}\n{job['hip']}\nDeadline : {job['id']}")
+            item.setToolTip(0, f"{job['node']}\n{job['hip']}\nDeadline: {job['id']}")
             item.setToolTip(4, timing)
             item.setData(0, QtCore.Qt.UserRole, job)
             bar = QtWidgets.QProgressBar()
@@ -1360,12 +1360,11 @@ class QueuePanel(QtWidgets.QWidget):
             workers = [w.strip() for w in self.dl.run("-GetSlaveNames", timeout=15).splitlines() if w.strip()]
             states = [(w, self.dl._parse(self.dl.run("-GetSlave", w, timeout=15)).get("SlaveState", "?")) for w in workers]
         except Exception as error:
-            self.worker.setText(f"Deadline injoignable : {error}")
+            self.worker.setText(f"Deadline unreachable: {error}")
             return
-        fr = {"Offline": "hors ligne", "Idle": "libre", "Rendering": "en calcul", "Stalled": "bloqué"}
-        text = "  ·  ".join(f"{w} : {fr.get(s, s)}" for w, s in states)
+        text = "  ·  ".join(f"{w}: {s.lower()}" for w, s in states)
         if all(s == "Offline" for _, s in states):
-            text += "  (lance Deadline Worker pour que la file tourne)"
+            text += "  (start Deadline Worker so the queue runs)"
             self.worker.setStyleSheet("color: #e0a030;")
         else:
             self.worker.setStyleSheet("")
@@ -1383,10 +1382,10 @@ class QueuePanel(QtWidgets.QWidget):
             self.detail.setText("")
             return
         status = job.get("Status")
-        self.buttons["pause"].setText("Reprendre" if status == "Suspended" else "Suspendre")
+        self.buttons["pause"].setText("Resume" if status == "Suspended" else "Suspend")
         self.buttons["now"].setEnabled(bool(job.get("scheduled")) and status not in self.dl.DONE)
-        deps = f"  ·  attend {len(job['deps'])} job(s)" if job.get("deps") else ""
-        when = f"  ·  programmé {job['scheduled'][11:16]}" if job.get("scheduled") else ""
+        deps = f"  ·  waits for {len(job['deps'])} job(s)" if job.get("deps") else ""
+        when = f"  ·  scheduled {job['scheduled'][11:16]}" if job.get("scheduled") else ""
         self.detail.setText(f"{job['node']}  ·  {os.path.basename(job['hip'])}{when}{deps}")
 
     def _act(self, verb):
@@ -1419,8 +1418,8 @@ class QueuePanel(QtWidgets.QWidget):
         if not job:
             return
         if os.path.normcase(os.path.normpath(job["hip"])) != os.path.normcase(os.path.normpath(hou.hipFile.path())):
-            if hou.ui.displayMessage(f"Ce job vient d'une autre scène :\n{os.path.basename(job['hip'])}\n\nL'ouvrir ?",
-                                     buttons=("Ouvrir la scène", "Annuler"), close_choice=1) != 0 or not _confirm_discard():
+            if hou.ui.displayMessage(f"This job comes from another scene:\n{os.path.basename(job['hip'])}\n\nOpen it?",
+                                     buttons=("Open scene", "Cancel"), close_choice=1) != 0 or not _confirm_discard():
                 return
             mke_project.open_scene(job["hip"])
         node = hou.node(job["node"])
@@ -1437,41 +1436,41 @@ class ArchiveDialog(QtWidgets.QDialog):
         import mke_archive
         self.archive = mke_archive
         self.info = info
-        self.setWindowTitle(f"Archiver  ·  {info['name']}")
+        self.setWindowTitle(f"Archive  ·  {info['name']}")
         self.setStyleSheet(STYLE)
         self.setMinimumWidth(620)
-        self.caches = QtWidgets.QCheckBox("Inclure les caches (bgeo, vdb, sim...)")
-        self.renders = QtWidgets.QCheckBox("Inclure les rendus EXR")
+        self.caches = QtWidgets.QCheckBox("Include caches (bgeo, vdb, sim...)")
+        self.renders = QtWidgets.QCheckBox("Include EXR renders")
         self.estimate = _label("", "hint")
         self.destination = QtWidgets.QLineEdit(mke_archive.default_destination(info).replace("\\", "/"))
         browse = QtWidgets.QToolButton()
         browse.setText("...")
         browse.clicked.connect(self._browse)
-        cancel = QtWidgets.QPushButton("Annuler")
+        cancel = QtWidgets.QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
-        self.go = QtWidgets.QPushButton("Archiver")
+        self.go = QtWidgets.QPushButton("Archive")
         self.go.setObjectName("primary")
         self.go.clicked.connect(self._run)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(_card("Contenu", [("", _label("Scènes, sources (IN), dailies, notes, temps passé et réglages du projet. "
-                                                       "Un fichier ARCHIVE_INFO.md résume le projet à l'intérieur du zip.", "hint")),
+        layout.addWidget(_card("Contents", [("", _label("Scenes, sources (IN), dailies, notes, time spent and project settings. "
+                                                       "An ARCHIVE_INFO.md inside the zip sums the project up.", "hint")),
                                            ("", self.caches), ("", self.renders), ("", self.estimate)]))
         dest = QtWidgets.QHBoxLayout()
         dest.addWidget(self.destination, 1)
         dest.addWidget(browse)
-        layout.addWidget(_card("Destination", [("Fichier zip", dest)]))
+        layout.addWidget(_card("Destination", [("Zip file", dest)]))
         layout.addLayout(_row(None, cancel, self.go))
         self.caches.toggled.connect(self._refresh)
         self.renders.toggled.connect(self._refresh)
         self._refresh()
 
     def _refresh(self, *_):
-        self.estimate.setText("Calcul de la taille...")
+        self.estimate.setText("Computing size...")
         QtWidgets.QApplication.processEvents()
         kept, skipped = self.archive.plan(self.info, self.caches.isChecked(), self.renders.isChecked())
         out = "  ·  ".join(f"{reason} : {mke_tracking.human(size)}" for reason, size in skipped.items())
-        self.estimate.setText(f"À archiver : {len(kept)} fichiers, {mke_tracking.human(sum(s for *_, s in kept))}"
-                              + (f"\nLaissé de côté : {out}" if out else ""))
+        self.estimate.setText(f"To archive: {len(kept)} files, {mke_tracking.human(sum(s for *_, s in kept))}"
+                              + (f"\nLeft out: {out}" if out else ""))
 
     def _browse(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Archive", self.destination.text(), "Zip (*.zip)")
@@ -1481,11 +1480,11 @@ class ArchiveDialog(QtWidgets.QDialog):
     def _run(self):
         destination = self.destination.text().strip()
         if os.path.exists(destination) and hou.ui.displayMessage(
-                f"{os.path.basename(destination)} existe déjà. Le remplacer ?", buttons=("Remplacer", "Annuler"),
+                f"{os.path.basename(destination)} already exists. Replace it?", buttons=("Replace", "Cancel"),
                 default_choice=1, close_choice=1) != 0:
             return
-        dialog = QtWidgets.QProgressDialog("Archivage...", "Annuler", 0, 1000, self)
-        dialog.setWindowTitle("Archivage")
+        dialog = QtWidgets.QProgressDialog("Archiving...", "Cancel", 0, 1000, self)
+        dialog.setWindowTitle("Archiving")
         dialog.setMinimumDuration(0)
 
         def progress(done, total, name):
@@ -1502,12 +1501,12 @@ class ArchiveDialog(QtWidgets.QDialog):
             return
         except Exception as error:
             dialog.close()
-            hou.ui.displayMessage(f"Archivage impossible : {error}", severity=hou.severityType.Error)
+            hou.ui.displayMessage(f"Archiving failed: {error}", severity=hou.severityType.Error)
             return
         dialog.close()
         self.accept()
         reveal(path)
-        hou.ui.setStatusMessage(f"Archive : {path} ({mke_tracking.human(os.path.getsize(path))})")
+        hou.ui.setStatusMessage(f"Archive: {path} ({mke_tracking.human(os.path.getsize(path))})")
 
 
 # ==================================================================== new project
@@ -1515,7 +1514,7 @@ class ArchiveDialog(QtWidgets.QDialog):
 class CreateProjectDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Nouveau projet")
+        self.setWindowTitle("New project")
         self.setStyleSheet(STYLE)
         self.resize(580, 820)
         self.presets = mke_project.load_presets()
@@ -1523,9 +1522,9 @@ class CreateProjectDialog(QtWidgets.QDialog):
         self.existing_root = None
         layout = QtWidgets.QVBoxLayout(self)
 
-        layout.addWidget(_section("Nom du projet"))
+        layout.addWidget(_section("Project name"))
         self.name_input = QtWidgets.QLineEdit()
-        self.name_input.setPlaceholderText("ex : Ocean_Teaser")
+        self.name_input.setPlaceholderText("e.g. Ocean_Teaser")
         self.name_input.setStyleSheet("font-size: 12pt; padding: 4px;")
         layout.addWidget(self.name_input)
 
@@ -1544,31 +1543,31 @@ class CreateProjectDialog(QtWidgets.QDialog):
             type_row.addWidget(button)
         layout.addLayout(type_row)
         self.other_input = QtWidgets.QLineEdit()
-        self.other_input.setPlaceholderText("Nom du type, ex : CFX")
+        self.other_input.setPlaceholderText("Type name, e.g. CFX")
         self.other_input.setVisible(False)
         layout.addWidget(self.other_input)
 
-        layout.addWidget(_section("Emplacement"))
+        layout.addWidget(_section("Location"))
         recent = mke_project.recent_projects()
         default_parent = os.path.dirname(recent[0]) if recent else os.path.expanduser("~")
         self.parent_input = QtWidgets.QLineEdit(default_parent)
-        layout.addLayout(_path_field(self.parent_input, "Dossier où créer le projet", self))
+        layout.addLayout(_path_field(self.parent_input, "Folder where the project is created", self))
         self.preview = _label("", "hint")
         self.warning = _label("", "warning")
         layout.addWidget(self.preview)
         layout.addWidget(self.warning)
 
-        layout.addWidget(_section("Réglages"))
+        layout.addWidget(_section("Settings"))
         layout.addWidget(self._settings_panel(), 1)
-        self.starter_check = QtWidgets.QCheckBox("Préparer une scène de départ avec les outils MKE")
+        self.starter_check = QtWidgets.QCheckBox("Prepare a starter scene with the MKE tools")
         self.starter_check.setChecked(True)
         layout.addWidget(self.starter_check)
 
         buttons = QtWidgets.QHBoxLayout()
         buttons.addStretch()
-        cancel = QtWidgets.QPushButton("Annuler")
+        cancel = QtWidgets.QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
-        self.create_button = QtWidgets.QPushButton("Créer le projet")
+        self.create_button = QtWidgets.QPushButton("Create project")
         self.create_button.setObjectName("primary")
         self.create_button.setDefault(True)
         self.create_button.clicked.connect(self._create)
@@ -1593,21 +1592,21 @@ class CreateProjectDialog(QtWidgets.QDialog):
         self.res_y = _spin(16, 16384, d["resolution"][1])
         frames = QtWidgets.QHBoxLayout()
         frames.addWidget(self.start)
-        frames.addWidget(QtWidgets.QLabel("à"))
+        frames.addWidget(QtWidgets.QLabel("to"))
         frames.addWidget(self.end)
         res = QtWidgets.QHBoxLayout()
         res.addWidget(self.res_x)
         res.addWidget(QtWidgets.QLabel("x"))
         res.addWidget(self.res_y)
         self.cache_input = QtWidgets.QLineEdit(self.presets["cache"])
-        self.cache_input.setToolTip("Relatif au projet (3D/CACHES) ou absolu (ex : D:/CACHES/projet)")
+        self.cache_input.setToolTip("Relative to the project (3D/CACHES) or absolute (e.g. D:/CACHES/project)")
         self.ocio_input = QtWidgets.QLineEdit(d.get("ocio", ""))
-        self.ocio_input.setPlaceholderText("vide = config de Houdini")
-        self.keep_check = QtWidgets.QCheckBox("Garder la scène ouverte au lieu d'une scène vide")
-        form.addRow("Images / seconde", self.fps)
+        self.ocio_input.setPlaceholderText("empty = Houdini's config")
+        self.keep_check = QtWidgets.QCheckBox("Keep the open scene instead of an empty one")
+        form.addRow("Frames per second", self.fps)
         form.addRow("Frames", frames)
-        form.addRow("Résolution", res)
-        form.addRow("Cache", _path_field(self.cache_input, "Dossier de cache", self))
+        form.addRow("Resolution", res)
+        form.addRow("Cache", _path_field(self.cache_input, "Cache folder", self))
         form.addRow("OCIO", self.ocio_input)
         form.addRow("", self.keep_check)
 
@@ -1615,12 +1614,12 @@ class CreateProjectDialog(QtWidgets.QDialog):
         self.folder_tree.setHeaderHidden(True)
         self.folder_tree.setMinimumHeight(160)
         self.folder_input = QtWidgets.QLineEdit()
-        self.folder_input.setPlaceholderText("Ajouter un dossier, ex : IN/AUDIO")
+        self.folder_input.setPlaceholderText("Add a folder, e.g. IN/AUDIO")
         self.folder_input.returnPressed.connect(self._add_folder)
         folders = QtWidgets.QVBoxLayout()
         folders.addWidget(self.folder_tree)
         folders.addWidget(self.folder_input)
-        form.addRow("Dossiers", folders)
+        form.addRow("Folders", folders)
         self.cache_input.textChanged.connect(self._refresh_folders)
         return panel
 
@@ -1693,11 +1692,11 @@ class CreateProjectDialog(QtWidgets.QDialog):
         name = mke_project.sanitize_name(self.name_input.text())
         root = os.path.join(self.parent_input.text(), name).replace("\\", "/")
         self.create_button.setEnabled(bool(name and self.project_type()))
-        self.preview.setText(f"Sera créé dans : .../{'/'.join(root.split('/')[-3:])}" if name else "")
+        self.preview.setText(f"Will be created in: .../{'/'.join(root.split('/')[-3:])}" if name else "")
         self.preview.setToolTip(root)
         warnings = []
         if name and os.path.isfile(os.path.join(root, mke_project.PROJECT_FILE)):
-            warnings.append("Ce projet existe déjà : il te sera proposé de l'ouvrir.")
+            warnings.append("This project already exists: you will be offered to open it.")
         server = mke_project.server_warning(root)
         if server:
             warnings.append(server)
@@ -1715,16 +1714,16 @@ class CreateProjectDialog(QtWidgets.QDialog):
                 self.cache_input.text().strip() or self.presets["cache"],
                 keep_scene=self.keep_check.isChecked(), starter=self.starter_check.isChecked())
         except FileExistsError as existing:
-            if hou.ui.displayMessage(f"Ce projet existe déjà :\n{existing}", buttons=("Le voir", "Annuler"),
+            if hou.ui.displayMessage(f"This project already exists:\n{existing}", buttons=("Show it", "Cancel"),
                                      close_choice=1) == 0:
                 self.existing_root = str(existing).replace("\\", "/")
                 self.reject()
             return
         except Exception as error:
-            hou.ui.displayMessage(f"La création a échoué : {error}", severity=hou.severityType.Error)
+            hou.ui.displayMessage(f"Creation failed: {error}", severity=hou.severityType.Error)
             return
         self.accept()
-        hou.ui.setStatusMessage(f"Projet {info['name']} créé, scène {os.path.basename(hip)} ouverte.")
+        hou.ui.setStatusMessage(f"Project {info['name']} created, scene {os.path.basename(hip)} opened.")
 
 
 # ==================================================================== shots and assets
@@ -1733,22 +1732,22 @@ class EntitiesDialog(QtWidgets.QDialog):
     def __init__(self, info, parent=None):
         super().__init__(parent)
         self.info = info
-        self.setWindowTitle(f"Plans et assets  ·  {info['name']}")
+        self.setWindowTitle(f"Shots and assets  ·  {info['name']}")
         self.setStyleSheet(STYLE)
         self.resize(560, 560)
 
         self.seq_input = QtWidgets.QLineEdit()
-        self.seq_input.setPlaceholderText("Séquence, ex : SEQ010")
+        self.seq_input.setPlaceholderText("Sequence, e.g. SEQ010")
         self.shot_input = QtWidgets.QLineEdit()
-        self.shot_input.setPlaceholderText("Plan, ex : SH0010")
+        self.shot_input.setPlaceholderText("Shot, e.g. SH0010")
         self.shot_start = _spin(-100000, 100000, info["frame_start"])
         self.shot_end = _spin(-100000, 100000, info["frame_end"])
-        shot_button = QtWidgets.QPushButton("Ajouter / mettre à jour le plan")
+        shot_button = QtWidgets.QPushButton("Add / update shot")
         shot_button.clicked.connect(self._add_shot)
         self.shot_input.returnPressed.connect(shot_button.click)
         self.asset_input = QtWidgets.QLineEdit()
-        self.asset_input.setPlaceholderText("Nom de l'asset, ex : Rocher")
-        asset_button = QtWidgets.QPushButton("Ajouter l'asset")
+        self.asset_input.setPlaceholderText("Asset name, e.g. Rock")
+        asset_button = QtWidgets.QPushButton("Add asset")
         asset_button.clicked.connect(lambda: self._add("asset", asset=self.asset_input.text()))
         self.asset_input.returnPressed.connect(asset_button.click)
 
@@ -1758,7 +1757,7 @@ class EntitiesDialog(QtWidgets.QDialog):
         range_row = QtWidgets.QHBoxLayout()
         range_row.addWidget(QtWidgets.QLabel("Frames"))
         range_row.addWidget(self.shot_start)
-        range_row.addWidget(QtWidgets.QLabel("à"))
+        range_row.addWidget(QtWidgets.QLabel("to"))
         range_row.addWidget(self.shot_end)
         range_row.addStretch()
         range_row.addWidget(shot_button)
@@ -1768,24 +1767,24 @@ class EntitiesDialog(QtWidgets.QDialog):
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.currentItemChanged.connect(self._fill_shot_fields)
-        close = QtWidgets.QPushButton("Fermer")
+        close = QtWidgets.QPushButton("Close")
         close.clicked.connect(self.accept)
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(_section("Plan"))
+        layout.addWidget(_section("Shot"))
         layout.addLayout(shot_row)
         layout.addLayout(range_row)
-        layout.addWidget(_label("Clique un plan existant ci-dessous pour modifier sa plage de frames.", "hint"))
+        layout.addWidget(_label("Click an existing shot below to edit its frame range.", "hint"))
         layout.addWidget(_section("Asset"))
         layout.addLayout(asset_row)
-        layout.addWidget(_section("Dans le projet"))
+        layout.addWidget(_section("In the project"))
         layout.addWidget(self.tree, 1)
         layout.addWidget(close, 0, QtCore.Qt.AlignRight)
         self._refresh()
 
     def _refresh(self):
         self.tree.clear()
-        shots = QtWidgets.QTreeWidgetItem(self.tree, [f"Plans ({len(self.info['shots'])})"])
+        shots = QtWidgets.QTreeWidgetItem(self.tree, [f"Shots ({len(self.info['shots'])})"])
         sequences = {}
         for entry in self.info["shots"]:
             seq, shot = entry.split("/")
@@ -1810,7 +1809,7 @@ class EntitiesDialog(QtWidgets.QDialog):
 
     def _add_shot(self):
         if self.shot_end.value() < self.shot_start.value():
-            hou.ui.displayMessage("La fin doit être après le début.", severity=hou.severityType.Warning)
+            hou.ui.displayMessage("The end must be after the start.", severity=hou.severityType.Warning)
             return
         self._add("shot", frame_range=(self.shot_start.value(), self.shot_end.value()),
                   seq=self.seq_input.text(), shot=self.shot_input.text())
@@ -1819,10 +1818,10 @@ class EntitiesDialog(QtWidgets.QDialog):
         try:
             created = mke_project.add_entity(self.info, kind, frame_range, **names)
         except ValueError:
-            hou.ui.displayMessage("Remplis tous les champs.", severity=hou.severityType.Warning)
+            hou.ui.displayMessage("Fill in every field.", severity=hou.severityType.Warning)
             return
         self._refresh()
-        hou.ui.setStatusMessage(f"{'/'.join(names.values())} : {len(created)} dossiers prêts")
+        hou.ui.setStatusMessage(f"{'/'.join(names.values())} : {len(created)} folders ready")
 
 
 # ==================================================================== entry points

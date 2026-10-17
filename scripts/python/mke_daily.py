@@ -60,7 +60,7 @@ def encode(pattern, start_frame, fps, out_path):
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
     if result.returncode != 0 or not os.path.isfile(out_path):
-        raise RuntimeError(f"Encodage échoué : {result.stderr.strip()[-400:]}")
+        raise RuntimeError(f"Encoding failed: {result.stderr.strip()[-400:]}")
     return out_path
 
 
@@ -68,7 +68,7 @@ def flipbook(out_path, start, end, resolution, fps):
     """Viewport flipbook to a temp jpg sequence, then encode. Needs Houdini's UI."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if viewer is None:
-        raise RuntimeError("Aucun viewport (Scene View) ouvert.")
+        raise RuntimeError("No viewport (Scene View) open.")
     tmp = tempfile.mkdtemp(prefix="mke_daily_")
     try:
         settings = viewer.flipbookSettings().stash()
@@ -89,7 +89,7 @@ def dailyFlipbook():
     info = mke_project.on_scene_load() if not hou.hipFile.isNewFile() else None
     info = info or mke_project.find_project(hou.getenv("JOB") or os.getcwd())
     if not info:
-        hou.ui.displayMessage("Ouvre d'abord une scène d'un projet (dashboard Projects).", severity=hou.severityType.Warning)
+        hou.ui.displayMessage("Open a project scene first (Projects dashboard).", severity=hou.severityType.Warning)
         return
     dialog = DailyDialog(info, hou.qt.mainWindow())
     dialog.show()
@@ -110,9 +110,9 @@ class DailyDialog(QtWidgets.QDialog):
         self.setMinimumWidth(560)
         start, end = hou.playbar.playbackRange()
         self.context = QtWidgets.QLineEdit(default_context(info))
-        self.context.setPlaceholderText("ex : ACT2, SEQ010_SH0010")
+        self.context.setPlaceholderText("e.g. ACT2, SEQ010_SH0010")
         self.description = QtWidgets.QLineEdit(info.get("daily_description", ""))
-        self.description.setPlaceholderText("ex : car_cubePropagation")
+        self.description.setPlaceholderText("e.g. car_cubePropagation")
         self.version = QtWidgets.QLineEdit(scene_version())
         self.version.setFixedWidth(70)
         self.initials = QtWidgets.QLineEdit(mke_project.get_pref("initials", mke_project.user_trigram()[:2].upper()))
@@ -124,33 +124,33 @@ class DailyDialog(QtWidgets.QDialog):
         for pct in (100, 75, 50, 25):
             self.scale.addItem(f"{pct} %  ({w * pct // 100}x{h * pct // 100})", pct)
         self.scale.setCurrentIndex(2 if w >= 3000 else 0)
-        self.open_after = QtWidgets.QCheckBox("Lire la vidéo à la fin")
+        self.open_after = QtWidgets.QCheckBox("Play the video when done")
         self.open_after.setChecked(True)
         import mke_notify
-        self.discord = QtWidgets.QCheckBox("Notifier sur Discord")
+        self.discord = QtWidgets.QCheckBox("Notify on Discord")
         self.discord.setEnabled(bool(mke_notify.webhook_url()))
         self.discord.setChecked(self.discord.isEnabled() and mke_project.get_pref("daily_discord", True))
         if not self.discord.isEnabled():
-            self.discord.setToolTip("Configure d'abord le webhook : MK Utils > Discord Notifications...")
+            self.discord.setToolTip("Set up the webhook first: MK Utils > Discord Notifications...")
         self.preview = ui._label("", "hint")
         self.preview.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self.error = ui._label("", "warning")
-        run = QtWidgets.QPushButton("Lancer le flipbook")
+        run = QtWidgets.QPushButton("Run flipbook")
         run.setObjectName("primary")
         run.setDefault(True)
         run.clicked.connect(self._run)
         self.run_button = run
-        cancel = QtWidgets.QPushButton("Annuler")
+        cancel = QtWidgets.QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(ui._card("Nom", [
-            ("Contexte", self.context), ("Description", self.description),
-            ("Version", ui._row(self.version, "Initiales", self.initials, None)),
+        layout.addWidget(ui._card("Name", [
+            ("Context", self.context), ("Description", self.description),
+            ("Version", ui._row(self.version, "Initials", self.initials, None)),
         ]))
         layout.addWidget(ui._card("Image", [
             ("Frames", ui._row(self.start, "→", self.end, None)),
-            ("Taille", ui._row(self.scale, None)),
+            ("Size", ui._row(self.scale, None)),
         ]))
         layout.addWidget(self.preview)
         layout.addWidget(self.error)
@@ -171,15 +171,15 @@ class DailyDialog(QtWidgets.QDialog):
         path = self.out_path()
         folder = os.path.dirname(path)
         short = folder if len(folder) < 60 else ".../" + "/".join(folder.split("/")[-3:])
-        self.preview.setText(f"{os.path.basename(path)}\ndans {short}")
+        self.preview.setText(f"{os.path.basename(path)}\nin {short}")
         self.preview.setToolTip(path)
         errors = []
         if not self.description.text().strip():
-            errors.append("Ajoute une description.")
+            errors.append("Add a description.")
         if self.end.value() < self.start.value():
-            errors.append("La dernière frame doit être après la première.")
+            errors.append("The last frame must be after the first one.")
         if os.path.exists(path):
-            errors.append("Ce fichier existe déjà : change la description ou la version.")
+            errors.append("This file already exists: change the description or the version.")
         self.error.setText("\n".join(errors))
         self.error.setVisible(bool(errors))
         self.run_button.setEnabled(not errors)
@@ -201,7 +201,7 @@ class DailyDialog(QtWidgets.QDialog):
                 flipbook(path, self.start.value(), self.end.value(), res, self.info["fps"])
         except Exception as error:
             self.show()
-            hou.ui.displayMessage(f"Le flipbook a échoué : {error}", severity=hou.severityType.Error)
+            hou.ui.displayMessage(f"Flipbook failed: {error}", severity=hou.severityType.Error)
             return
         self.accept()
         hou.ui.setStatusMessage(f"Daily : {os.path.basename(path)}")

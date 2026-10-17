@@ -40,7 +40,7 @@ def plan(info, include_caches=False, include_renders=False):
             if not include_caches and (in_cache_root or lower.endswith(CACHE_EXT)):
                 skip("Caches (bgeo, vdb, sim...)", size)
             elif not include_renders and lower.endswith(RENDER_EXT) and not in_sources:
-                skip("Rendus EXR", size)
+                skip("EXR renders", size)
             else:
                 kept.append((path, os.path.relpath(path, root), size))
     return kept, skipped
@@ -51,25 +51,25 @@ def info_markdown(info, kept, skipped, include_caches, include_renders):
     statuses = mke_tracking.all_statuses(info)
     lines = [
         f"# Archive : {info['name']}", "",
-        f"- Archivé le {datetime.datetime.now():%d/%m/%Y %H:%M} par {mke_project.user_trigram()}",
-        f"- Projet créé le {info.get('created', '?')}, type {info['type']}, {info['fps']:g} fps, "
+        f"- Archived on {datetime.datetime.now():%d/%m/%Y %H:%M} by {mke_project.user_trigram()}",
+        f"- Project created on {info.get('created', '?')}, type {info['type']}, {info['fps']:g} fps, "
         f"{info['resolution'][0]}x{info['resolution'][1]}",
-        f"- Dossier d'origine : `{info['root']}`",
-        f"- {len(kept)} fichiers, {mke_tracking.human(sum(s for *_, s in kept))} avant compression", "",
-        "## Temps passé", "",
-        f"**Total : {mke_tracking.hours(summary['total'])}** sur {len(summary['days'])} jour(s) travaillé(s)", "",
+        f"- Original folder: `{info['root']}`",
+        f"- {len(kept)} files, {mke_tracking.human(sum(s for *_, s in kept))} before compression", "",
+        "## Time spent", "",
+        f"**Total: {mke_tracking.hours(summary['total'])}** over {len(summary['days'])} working day(s)", "",
     ]
     lines += [f"- {mke_tracking.key_label(key)} : {mke_tracking.hours(seconds)}"
               for key, seconds in sorted(summary["keys"].items(), key=lambda kv: -kv[1])]
     if statuses:
-        lines += ["", "## Statut des plans", ""]
+        lines += ["", "## Shot status", ""]
         lines += [f"- {mke_tracking.key_label(key)} : {mke_tracking.STATUS[status][0]}" for key, status in sorted(statuses.items())]
-    lines += ["", "## Laissé de côté", ""]
+    lines += ["", "## Left out", ""]
     if skipped:
-        lines += [f"- {reason} : {mke_tracking.human(size)} (toujours dans le dossier d'origine)" for reason, size in skipped.items()]
+        lines += [f"- {reason} : {mke_tracking.human(size)} (still in the original folder)" for reason, size in skipped.items()]
     else:
-        lines.append("- Rien : l'archive est complète.")
-    lines += ["", f"Options : caches {'inclus' if include_caches else 'exclus'}, rendus EXR {'inclus' if include_renders else 'exclus'}."]
+        lines.append("- Nothing: the archive is complete.")
+    lines += ["", f"Options: caches {'included' if include_caches else 'excluded'}, EXR renders {'included' if include_renders else 'excluded'}."]
     return "\n".join(lines) + "\n"
 
 
@@ -94,7 +94,7 @@ def archive(info, destination=None, include_caches=False, include_renders=False,
                 archive_file.write(path, arcname, compress_type=compress)
                 done += size
                 if progress and progress(done, total, arcname) is False:
-                    raise InterruptedError("Archivage annulé")
+                    raise InterruptedError("Archiving cancelled")
         os.replace(tmp, destination)
     except BaseException:
         if os.path.exists(tmp):

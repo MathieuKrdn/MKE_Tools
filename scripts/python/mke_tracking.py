@@ -50,7 +50,7 @@ def entity_key(kind="project", **names):
 
 
 def key_label(key):
-    return "Scènes du projet" if key == PROJECT_KEY else key.replace("asset:", "Asset ")
+    return "Project scenes" if key == PROJECT_KEY else key.replace("asset:", "Asset ")
 
 
 def key_for_scene(info, hip):
@@ -124,7 +124,7 @@ def _safe(fn):
     try:
         fn()
     except Exception as error:  # tracking must never bother the artist
-        print(f"[MKE temps] {error}")
+        print(f"[MKE time] {error}")
 
 
 def week_start(day):
@@ -160,7 +160,7 @@ def export_csv(info, path):
     summary = time_summary(info)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f, delimiter=";")
-        writer.writerow(["Date", "Projet", "Plan / asset", "Heures"])
+        writer.writerow(["Date", "Project", "Shot / asset", "Hours"])
         for day, _, per_key in sorted(summary["days"]):
             for key, seconds in sorted(per_key.items()):
                 writer.writerow([day.isoformat(), info["name"], key_label(key), f"{seconds / 3600:.2f}".replace(".", ",")])
@@ -171,11 +171,11 @@ def export_csv(info, path):
 # ---------------------------------------------------------------- 2. notes and statuses
 
 STATUSES = [  # key, label, color
-    ("todo", "À faire", "#8a8a8a"),
+    ("todo", "To do", "#8a8a8a"),
     ("wip", "WIP", "#4f86c6"),
-    ("review", "En review", "#d1a33a"),
-    ("retours", "Retours client", "#d0603f"),
-    ("ok", "Validé", "#4caf61"),
+    ("review", "In review", "#d1a33a"),
+    ("retours", "Client feedback", "#d0603f"),
+    ("ok", "Approved", "#4caf61"),
 ]
 STATUS = {key: (label, color) for key, label, color in STATUSES}
 
@@ -310,11 +310,11 @@ def old_versions(caches, keep=2):
 
 
 def human(size):
-    for unit in ("o", "Ko", "Mo", "Go"):
+    for unit in ("B", "KB", "MB", "GB"):
         if size < 1024:
-            return f"{size:.0f} {unit}" if unit in ("o", "Ko") else f"{size:.1f} {unit}"
+            return f"{size:.0f} {unit}" if unit in ("B", "KB") else f"{size:.1f} {unit}"
         size /= 1024
-    return f"{size:.2f} To"
+    return f"{size:.2f} TB"
 
 
 def recycle(paths):
@@ -322,7 +322,7 @@ def recycle(paths):
     if not paths:
         return
     if sys.platform != "win32":
-        raise RuntimeError("Corbeille disponible seulement sous Windows.")
+        raise RuntimeError("Recycle Bin is only available on Windows.")
     import ctypes
     from ctypes import wintypes
 
@@ -337,4 +337,4 @@ def recycle(paths):
                          False, None, None)
     result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
     if result != 0 or op.fAnyOperationsAborted:
-        raise RuntimeError(f"Suppression interrompue (code {result}).")
+        raise RuntimeError(f"Deletion interrupted (code {result}).")

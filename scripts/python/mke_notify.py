@@ -58,7 +58,7 @@ def send(content, embed=None, url=None, wait=False, attachment=None):
             urllib.request.urlopen(request, timeout=30).close()
             return True
         except Exception as error:
-            print(f"[MKE Discord] envoi impossible : {error}")
+            print(f"[MKE Discord] could not send: {error}")
             return False
 
     if wait or not hou.isUIAvailable():  # farm / hython: the process may exit right after, so send now
@@ -72,11 +72,11 @@ def _field(name, value, inline=True):
 
 
 def context_fields():
-    """Projet (when the scene belongs to one) and Scène, shared by every notification."""
+    """Project (when the scene belongs to one) and Scene, shared by every notification."""
     hip = hou.hipFile.path()
     info = None if hou.hipFile.isNewFile() else mke_project.find_project(os.path.dirname(hip))
-    fields = [_field("Projet", f"{info['name']}  ·  {info['type']}")] if info else []
-    return fields + [_field("Scène", hou.hipFile.basename())]
+    fields = [_field("Project", f"{info['name']}  ·  {info['type']}")] if info else []
+    return fields + [_field("Scene", hou.hipFile.basename())]
 
 
 def _embed(title, description, fields, color=0x3D9A50):
@@ -100,13 +100,13 @@ def setup_filecache(node):
         return False
     group = node.parmTemplateGroup()
     folder = hou.FolderParmTemplate("discord", "Discord", folder_type=hou.folderType.Tabs)
-    folder.addParmTemplate(hou.ToggleParmTemplate("discord_notify", "Notifier sur Discord", default_value=True,
-                                                  help="Message sur ton serveur Discord à la fin du cache."))
+    folder.addParmTemplate(hou.ToggleParmTemplate("discord_notify", "Notify on Discord", default_value=True,
+                                                  help="Message on your Discord server when the cache finishes."))
     folder.addParmTemplate(hou.StringParmTemplate("discord_message", "Message", 1, default_value=("",),
-                                                  help="Texte ajouté à la notification (optionnel)."))
+                                                  help="Text added to the notification (optional)."))
     folder.addParmTemplate(hou.ButtonParmTemplate(
-        "discord_test", "Envoyer un test", script_callback_language=hou.scriptLanguage.Python,
-        script_callback="import mke_notify; mke_notify.send('Test depuis ' + kwargs['node'].path(), wait=True)"))
+        "discord_test", "Send a test", script_callback_language=hou.scriptLanguage.Python,
+        script_callback="import mke_notify; mke_notify.send('Test from ' + kwargs['node'].path(), wait=True)"))
     group.append(folder)
     node.setParmTemplateGroup(group)
     for toggle, script, lang, code in (("tprerender", "prerender", "lprerender", PRE_SCRIPT),
@@ -127,7 +127,7 @@ def setup_scene_filecaches():
     """Menu action: add Discord notifications to every File Cache already in the scene."""
     nodes = [n for n in hou.node("/").allSubChildren() if is_filecache(n)]
     changed = [n for n in nodes if setup_filecache(n)]
-    hou.ui.displayMessage(f"{len(changed)} File Cache configurés pour Discord ({len(nodes) - len(changed)} l'étaient déjà).")
+    hou.ui.displayMessage(f"{len(changed)} File Caches set up for Discord ({len(nodes) - len(changed)} already were).")
     return changed
 
 
@@ -139,11 +139,11 @@ def _size(path):
 
 
 def _human(size):
-    for unit in ("o", "Ko", "Mo", "Go"):
+    for unit in ("B", "KB", "MB", "GB"):
         if size < 1024:
             return f"{size:.0f} {unit}"
         size /= 1024
-    return f"{size:.1f} To"
+    return f"{size:.1f} TB"
 
 
 def cache_started(node=None):
@@ -177,15 +177,15 @@ def cache_done(node=None):
     files = FRAME_RE.sub(lambda m: f"{m.group(1)}{'#' * len(m.group(2))}{m.group(3)}", os.path.basename(output))
     fields = context_fields() + [
         _field("Cache", cache),
-        _field("Fichiers", f"`{files}`"),
+        _field("Files", f"`{files}`"),
         _field("Frames", f"{int(node.evalParm('f1'))}-{int(node.evalParm('f2'))}"),
-        _field("Durée", duration),
-        _field("Taille", _human(_size(folder)) if os.path.isdir(folder) else "?"),
+        _field("Duration", duration),
+        _field("Size", _human(_size(folder)) if os.path.isdir(folder) else "?"),
         _field("Machine", socket.gethostname()),
-        _field("Dossier", f"`{folder}`", inline=False),
+        _field("Folder", f"`{folder}`", inline=False),
     ]
     note = node.evalParm("discord_message").strip()
-    send(f"✅ Cache **{cache}** terminé ({duration})", _embed(f"Cache terminé : {node.name()}", note or node.path(), fields))
+    send(f"✅ Cache **{cache}** finished ({duration})", _embed(f"Cache finished: {node.name()}", note or node.path(), fields))
 
 
 def daily_done(video, start, end, fps, seconds, note=""):
@@ -193,17 +193,17 @@ def daily_done(video, start, end, fps, seconds, note=""):
     duration = str(datetime.timedelta(seconds=int(seconds)))
     size = os.path.getsize(video) if os.path.isfile(video) else 0
     fields = context_fields() + [
-        _field("Fichier", f"`{os.path.basename(video)}`", inline=False),
+        _field("File", f"`{os.path.basename(video)}`", inline=False),
         _field("Frames", f"{start}-{end}"),
-        _field("Durée vidéo", f"{(end - start + 1) / fps:.1f} s à {fps:g} fps"),
-        _field("Temps de rendu", duration),
-        _field("Taille", _human(size) + ("" if size <= DISCORD_FILE_LIMIT else "  (trop lourde pour être jointe)")),
+        _field("Video length", f"{(end - start + 1) / fps:.1f} s at {fps:g} fps"),
+        _field("Render time", duration),
+        _field("Size", _human(size) + ("" if size <= DISCORD_FILE_LIMIT else "  (too large to attach)")),
         _field("Machine", socket.gethostname()),
-        _field("Dossier", f"`{os.path.dirname(video)}`", inline=False),
+        _field("Folder", f"`{os.path.dirname(video)}`", inline=False),
     ]
     name = os.path.splitext(os.path.basename(video))[0]
-    return send(f"🎬 Daily **{name}** prêt ({duration})",
-                _embed("Daily flipbook terminé", note or name, fields, color=0x3D6EA8), attachment=video)
+    return send(f"🎬 Daily **{name}** ready ({duration})",
+                _embed("Daily flipbook finished", note or name, fields, color=0x3D6EA8), attachment=video)
 
 
 # ---------------------------------------------------------------- setup
@@ -214,27 +214,27 @@ def configure():
     import projectSetup as ui
 
     dialog = QtWidgets.QDialog(hou.qt.mainWindow())
-    dialog.setWindowTitle("Notifications Discord")
+    dialog.setWindowTitle("Discord notifications")
     dialog.setStyleSheet(ui.STYLE)
     dialog.setMinimumWidth(560)
     url = QtWidgets.QLineEdit(mke_project.get_pref("discord_webhook", ""))
     url.setEchoMode(QtWidgets.QLineEdit.PasswordEchoOnEdit)
     url.setPlaceholderText("https://discord.com/api/webhooks/...")
-    help_text = ui._label("Sur ton serveur Discord : Paramètres du salon > Intégrations > Webhooks > Nouveau webhook > "
-                          "Copier l'URL. Colle-la ici. Elle reste sur ce PC (préférences Houdini), jamais dans les scènes.", "hint")
+    help_text = ui._label("On your Discord server: Channel settings > Integrations > Webhooks > New webhook > "
+                          "Copy URL. Paste it here. It stays on this PC (Houdini prefs), never in scenes.", "hint")
     status = ui._label("", "hint")
-    test = QtWidgets.QPushButton("Envoyer un test")
-    save = QtWidgets.QPushButton("Enregistrer")
+    test = QtWidgets.QPushButton("Send a test")
+    save = QtWidgets.QPushButton("Save")
     save.setObjectName("primary")
 
     def do_test():
-        ok = send("👋 Test depuis Houdini : les notifications de cache arriveront ici.", url=url.text().strip(), wait=True)
-        status.setText("Message envoyé, regarde ton salon Discord." if ok else "Échec : vérifie l'URL du webhook.")
+        ok = send("👋 Test from Houdini: cache notifications will arrive here.", url=url.text().strip(), wait=True)
+        status.setText("Message sent, check your Discord channel." if ok else "Failed: check the webhook URL.")
 
     def do_save():
         mke_project.set_pref("discord_webhook", url.text().strip())
         dialog.accept()
-        hou.ui.setStatusMessage("Webhook Discord enregistré")
+        hou.ui.setStatusMessage("Discord webhook saved")
 
     test.clicked.connect(do_test)
     save.clicked.connect(do_save)

@@ -13,9 +13,9 @@ Type=Filename
 Category=Options
 CategoryOrder=0
 Index=1
-Label=Fichier de préférences MKE (contient le webhook Discord)
+Label=MKE preferences file (holds the Discord webhook)
 Default=C:\Users\mathi\Documents\houdini22.0\mke_projects_prefs.json
-Description=Le webhook est lu dans ce fichier (clé discord_webhook), réglé depuis Houdini > MK Utils > Discord Notifications.
+Description=The webhook is read from this file (key discord_webhook), set from Houdini > MK Utils > Discord Notifications.
 
 [RecapHour]
 Type=Integer
@@ -24,6 +24,6 @@ Maximum=23
 Category=Options
 CategoryOrder=0
 Index=2
-Label=Heure du récap du matin
+Label=Morning recap hour
 Default=8
-Description=À partir de cette heure, un récap des jobs de la nuit est envoyé une fois par jour.
+Description=From this hour on, a recap of the night's jobs is sent once a day.

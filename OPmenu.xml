@@ -4,7 +4,7 @@
   <menu>
     <separatorItem/>
     <scriptItem id="mke_deadline_tonight">
-      <label>Deadline : calculer ce soir</label>
+      <label>Deadline: cache tonight</label>
       <context>
         <expression>__import__("mke_deadline").can_submit(kwargs["node"])</expression>
       </context>
@@ -12,7 +12,7 @@
 mke_deadline.submit_tonight(kwargs["node"])]]></scriptCode>
     </scriptItem>
     <scriptItem id="mke_deadline_now">
-      <label>Deadline : calculer maintenant</label>
+      <label>Deadline: cache now</label>
       <context>
         <expression>__import__("mke_deadline").can_submit(kwargs["node"])</expression>
       </context>

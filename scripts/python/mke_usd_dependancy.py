@@ -3,7 +3,7 @@ from pxr import Usd, UsdShade, Sdf, Ar
 import os
 from collections import defaultdict
 import mke_utils
-from PySide2 import QtWidgets, QtCore, QtGui
+from hutil.Qt import QtWidgets, QtCore, QtGui
 
 def analyze_layers_and_references(stage, dependencies, texture_exts, alembic_exts, usd_exts):
     """
@@ -28,7 +28,7 @@ def analyze_layers_and_references(stage, dependencies, texture_exts, alembic_ext
                 ext = mke_utils.get_file_extension(layer_path)
                 
                 if ext in usd_exts and layer_path != root_layer_path:
-                    dependencies['usd_references'][layer_path].append("Layer référencé")
+                    dependencies['usd_references'][layer_path].append("Referenced layer")
         
     except Exception as e:
         print(f"Warning: Could not analyze layers: {e}")
@@ -51,7 +51,7 @@ def analyze_layers_and_references(stage, dependencies, texture_exts, alembic_ext
                                     if resolved_path:
                                         ext = mke_utils.get_file_extension(resolved_path)
                                         if ext in usd_exts:
-                                            dependencies['usd_references'][resolved_path].append(f"Référence depuis {prim.GetPath()}")
+                                            dependencies['usd_references'][resolved_path].append(f"Reference from {prim.GetPath()}")
                                             ref_count += 1
                     except Exception as e:
                         print(f"Warning: GetAddedItems failed for {prim.GetPath()}: {e}")
@@ -88,7 +88,7 @@ def analyze_layers_and_references(stage, dependencies, texture_exts, alembic_ext
                                 if resolved_path:
                                     ext = mke_utils.get_file_extension(resolved_path)
                                     if ext in usd_exts:
-                                        dependencies['usd_references'][resolved_path].append(f"Payload depuis {prim.GetPath()}")
+                                        dependencies['usd_references'][resolved_path].append(f"Payload from {prim.GetPath()}")
                                         ref_count += 1
                 except Exception as e:
                     print(f"Warning: Could not analyze payloads for {prim.GetPath()}: {e}")
@@ -312,7 +312,7 @@ def show_non_serveur_dialog(non_serveur_files):
             
             # Header
             header_label = QtWidgets.QLabel(
-                f"<h2>⚠️ WARNING: {len(self.files_data)} file(s) are not on the server</h2>"
+                f"<h2>WARNING: {len(self.files_data)} file(s) are not on the server</h2>"
                 "<p>If these files are needed for rendering, they should be copied to the server. "
                 "<b>Right-click</b> on a file for more options.</p>"
             )
@@ -460,7 +460,7 @@ def show_non_serveur_dialog(non_serveur_files):
                 path (str): The path to copy.
             """
             QtWidgets.QApplication.clipboard().setText(path)
-            QtWidgets.QMessageBox.information(self, "Copié", f"Chemin copié:\n{path}")
+            QtWidgets.QMessageBox.information(self, "Copied", f"Path copied:\n{path}")
             
         def populate_tree(self):
             """Fill tree widget with file data"""
@@ -473,7 +473,7 @@ def show_non_serveur_dialog(non_serveur_files):
             
             for file_data in self.files_data:
                 # Status
-                status = "✅ Exists" if file_data['exists'] else "❌ MISSING"
+                status = "✅ Exists" if file_data['exists'] else "MISSING"
                 
                 # Shorten path for display
                 short_path = mke_utils.shorten_path(file_data['path'], 70)
