@@ -45,7 +45,7 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     #Create Job file
     jobInfoFilename = os.path.join(tempfile.gettempdir(), "usd_job_info.job")
     with open(jobInfoFilename, "w", encoding="utf-8") as writer:
-        writer.write("Plugin=HuskStandalone\n")
+        writer.write("Plugin=CommandLine\n")  # husk of this Houdini, run by mke_husk_render.py (no HuskStandalone plugin needed)
         #writer.write("HouVersion={}\n".format(hou.applicationVersionString()[:-4]))
         writer.write("Name={}\n".format("["+hip_name.upper()+"] "+jobName+ "_" + version))
         writer.write("Comment={}\n".format(hip_name+" "+jobName+ "_" + version))
@@ -81,14 +81,27 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
 
         writer.write("Frames={}\n".format(FrameList))
 
-    # Create plugin info file.
+    # Create plugin info file: Houdini's python runs husk for each task (works whatever Houdini version Deadline knows).
+    import glob
+    import datetime
+    import mke_deadline
+    import mke_project
+    hfs = hou.getenv("HFS")
+    python = (glob.glob(os.path.join(hfs, "python3*", "python.exe")) or [os.path.join(hfs, "bin", "hython.exe")])[0]
+    husk = os.path.join(hfs, "bin", "husk.exe")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mke_husk_render.py")
+    renderer = {"0": "BRAY_HdKarma", "cpu": "BRAY_HdKarma", "1": "BRAY_HdKarmaXPU", "xpu": "BRAY_HdKarmaXPU"}.get(
+        str(renderEngine).lower(), "BRAY_HdKarma")
+    output = self.exr_save_path.replace("####", "$F4")
+    info = mke_project.find_project(os.path.dirname(hou.hipFile.path()))
+    log_dir = os.path.join(info["root"], mke_deadline.LOG_DIR) if info else os.path.join(tempfile.gettempdir(), "mke_deadline_logs")
+    log = os.path.join(log_dir, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_") + f"{jobName}_{version}.log")
     pluginInfoFilename = os.path.join(tempfile.gettempdir(), "USD_plugin_info.job")
     with open(pluginInfoFilename, "w", encoding="utf-8") as writer:
-        writer.write("SceneFile={}\n".format(self.scene_file))
-        writer.write("LogLevel={}\n".format(LoggingMap.get(getattr(self, "log_level", "info"), "Info")))
-        writer.write("RenderEngine={}\n".format(renderEngine))  # Add render engine to environment
-        if self.exr_save_path:
-            writer.write("OutImage={}\n".format(self.exr_save_path))
+        writer.write("Executable={}\n".format(python.replace("\\", "/")))
+        writer.write('Arguments="{}" "{}" "{}" <STARTFRAME> <ENDFRAME> {} "{}" {} "{}"\n'.format(
+            script, husk, self.scene_file, int(self.IncFrame or 1), output, renderer, log).replace("\\", "/"))
+        writer.write("StartupDirectory={}\n".format(os.path.dirname(self.scene_file).replace("\\", "/")))
 
     # Setup the command line arguments.
     arguments = [jobInfoFilename, pluginInfoFilename]
@@ -96,6 +109,13 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     # Now submit the job.
     deadline_cmd = r"C:\Program Files\Thinkbox\Deadline10\bin\DeadlineCommand.exe"
     results = subprocess.run([deadline_cmd] + arguments, capture_output=True, text=True)
+    job_id = mke_deadline._parse(results.stdout).get("JobID")
+    if job_id and info:  # show it in the Projects dashboard, File tab
+        mke_deadline.write_queue(info, mke_deadline.read_queue(info) + [{
+            "id": job_id, "name": f"{jobName}  {version}  (rendu)", "node": hda.path(), "hip": hou.hipFile.path(),
+            "frames": [int(self.startFrame), int(self.endFrame)], "log": log.replace("\\", "/"),
+            "output": os.path.dirname(self.exr_save_path).replace("\\", "/"),
+            "submitted": datetime.datetime.now().isoformat(timespec="seconds"), "scheduled": None, "deps": []}])
     QtWidgets.QMessageBox.information(None, "Submission Results", results.stdout)
     hda.setColor(hou.Color((0, 1, 0)))  # Set color to green on successful submission
     hda.parm("exportexr").set(exr_save_path)
