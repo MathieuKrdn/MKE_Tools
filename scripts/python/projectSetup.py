@@ -1095,7 +1095,10 @@ class DiskPanel(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.summary)
         layout.addWidget(self.tree, 1)
-        layout.addLayout(_row(analyse, None, self.keep, select_old, self.delete_button))
+        archive = QtWidgets.QPushButton("Archiver le projet...")
+        archive.setToolTip("Fin de mission : un zip avec scènes, sources et dailies, sans les caches")
+        archive.clicked.connect(lambda: self.info and ArchiveDialog(self.info, self).exec_())
+        layout.addLayout(_row(analyse, archive, None, self.keep, select_old, self.delete_button))
         self._refresh_selection()
 
     def refresh(self, info):
@@ -1424,6 +1427,87 @@ class QueuePanel(QtWidgets.QWidget):
         if node is not None:
             mke_tracking.show_node(node)
             _step_aside(self)
+
+
+class ArchiveDialog(QtWidgets.QDialog):
+    """End-of-job archive of a project: what goes in, what stays out, where the zip goes."""
+
+    def __init__(self, info, parent=None):
+        super().__init__(parent)
+        import mke_archive
+        self.archive = mke_archive
+        self.info = info
+        self.setWindowTitle(f"Archiver  ·  {info['name']}")
+        self.setStyleSheet(STYLE)
+        self.setMinimumWidth(620)
+        self.caches = QtWidgets.QCheckBox("Inclure les caches (bgeo, vdb, sim...)")
+        self.renders = QtWidgets.QCheckBox("Inclure les rendus EXR")
+        self.estimate = _label("", "hint")
+        self.destination = QtWidgets.QLineEdit(mke_archive.default_destination(info).replace("\\", "/"))
+        browse = QtWidgets.QToolButton()
+        browse.setText("...")
+        browse.clicked.connect(self._browse)
+        cancel = QtWidgets.QPushButton("Annuler")
+        cancel.clicked.connect(self.reject)
+        self.go = QtWidgets.QPushButton("Archiver")
+        self.go.setObjectName("primary")
+        self.go.clicked.connect(self._run)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(_card("Contenu", [("", _label("Scènes, sources (IN), dailies, notes, temps passé et réglages du projet. "
+                                                       "Un fichier ARCHIVE_INFO.md résume le projet à l'intérieur du zip.", "hint")),
+                                           ("", self.caches), ("", self.renders), ("", self.estimate)]))
+        dest = QtWidgets.QHBoxLayout()
+        dest.addWidget(self.destination, 1)
+        dest.addWidget(browse)
+        layout.addWidget(_card("Destination", [("Fichier zip", dest)]))
+        layout.addLayout(_row(None, cancel, self.go))
+        self.caches.toggled.connect(self._refresh)
+        self.renders.toggled.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self, *_):
+        self.estimate.setText("Calcul de la taille...")
+        QtWidgets.QApplication.processEvents()
+        kept, skipped = self.archive.plan(self.info, self.caches.isChecked(), self.renders.isChecked())
+        out = "  ·  ".join(f"{reason} : {mke_tracking.human(size)}" for reason, size in skipped.items())
+        self.estimate.setText(f"À archiver : {len(kept)} fichiers, {mke_tracking.human(sum(s for *_, s in kept))}"
+                              + (f"\nLaissé de côté : {out}" if out else ""))
+
+    def _browse(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Archive", self.destination.text(), "Zip (*.zip)")
+        if path:
+            self.destination.setText(path)
+
+    def _run(self):
+        destination = self.destination.text().strip()
+        if os.path.exists(destination) and hou.ui.displayMessage(
+                f"{os.path.basename(destination)} existe déjà. Le remplacer ?", buttons=("Remplacer", "Annuler"),
+                default_choice=1, close_choice=1) != 0:
+            return
+        dialog = QtWidgets.QProgressDialog("Archivage...", "Annuler", 0, 1000, self)
+        dialog.setWindowTitle("Archivage")
+        dialog.setMinimumDuration(0)
+
+        def progress(done, total, name):
+            dialog.setValue(int(1000 * done / total))
+            dialog.setLabelText(f"{mke_tracking.human(done)} / {mke_tracking.human(total)}\n{name[-70:]}")
+            QtWidgets.QApplication.processEvents()
+            return not dialog.wasCanceled()
+
+        try:
+            path, (kept, _) = self.archive.archive(self.info, destination, self.caches.isChecked(),
+                                                   self.renders.isChecked(), progress)
+        except InterruptedError:
+            dialog.close()
+            return
+        except Exception as error:
+            dialog.close()
+            hou.ui.displayMessage(f"Archivage impossible : {error}", severity=hou.severityType.Error)
+            return
+        dialog.close()
+        self.accept()
+        reveal(path)
+        hou.ui.setStatusMessage(f"Archive : {path} ({mke_tracking.human(os.path.getsize(path))})")
 
 
 # ==================================================================== new project

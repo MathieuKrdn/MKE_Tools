@@ -1,0 +1,29 @@
+[State]
+Type=Enum
+Items=Global Enabled;Opt-In;Disabled
+Category=Options
+CategoryOrder=0
+Index=0
+Label=State
+Default=Global Enabled
+Description=How this event plug-in responds to events (MKE_Tools Discord notifications).
+
+[PrefsFile]
+Type=Filename
+Category=Options
+CategoryOrder=0
+Index=1
+Label=Fichier de préférences MKE (contient le webhook Discord)
+Default=C:\Users\mathi\Documents\houdini22.0\mke_projects_prefs.json
+Description=Le webhook est lu dans ce fichier (clé discord_webhook), réglé depuis Houdini > MK Utils > Discord Notifications.
+
+[RecapHour]
+Type=Integer
+Minimum=0
+Maximum=23
+Category=Options
+CategoryOrder=0
+Index=2
+Label=Heure du récap du matin
+Default=8
+Description=À partir de cette heure, un récap des jobs de la nuit est envoyé une fois par jour.
