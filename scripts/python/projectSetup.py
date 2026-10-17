@@ -7,14 +7,14 @@ from hutil.Qt import QtCore, QtWidgets
 import mke_project
 
 OTHER = "Autre"
+TYPE_STYLE = "padding: 6px 12px;"
+TYPE_CHECKED_STYLE = TYPE_STYLE + "background: #3d6ea8; color: white; border: 1px solid #5b8cc8;"
 STYLE = """
 QLabel#title { font-size: 15pt; font-weight: bold; }
 QLabel#hint { color: #8a8a8a; }
 QLabel#warning { color: #e0a030; }
 QLabel#active { padding: 6px 10px; border-radius: 4px; background: rgba(255, 255, 255, 18); }
 QPushButton#primary { padding: 6px 18px; font-weight: bold; }
-QPushButton[type_button="true"] { padding: 6px 12px; }
-QPushButton[type_button="true"]:checked { background: #3d6ea8; color: white; }
 """
 
 
@@ -65,7 +65,7 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("MKE Project Setup")
         self.setStyleSheet(STYLE)
-        self.resize(560, 560)
+        self.resize(580, 860)
         self.presets = mke_project.load_presets()
         self.custom_folders = []
 
@@ -107,12 +107,12 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         for i, type_ in enumerate(list(self.presets["types"]) + [OTHER]):
             label = {"RND": "R&&D"}.get(type_, type_ if len(type_) <= 3 else type_.capitalize())
             button = QtWidgets.QPushButton(label)
-            button.setProperty("type_button", True)
+            button.setStyleSheet(TYPE_STYLE)
             button.setProperty("type_value", type_)
             button.setCheckable(True)
             button.setFocusPolicy(QtCore.Qt.NoFocus)
-            button.setChecked(i == 0)
             self.type_group.addButton(button)
+            button.toggled.connect(lambda checked, b=button: self._on_type_toggled(b, checked))
             type_row.addWidget(button)
         layout.addLayout(type_row)
         self.other_input = QtWidgets.QLineEdit()
@@ -128,20 +128,8 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         layout.addWidget(self.preview)
         layout.addWidget(self.warning)
 
-        # Settings: one readable line, details folded away
         layout.addWidget(_section("Réglages"))
-        summary_row = QtWidgets.QHBoxLayout()
-        self.summary = _label("", "hint")
-        self.toggle = QtWidgets.QToolButton()
-        self.toggle.setText("Modifier")
-        self.toggle.setCheckable(True)
-        summary_row.addWidget(self.summary, 1)
-        summary_row.addWidget(self.toggle)
-        layout.addLayout(summary_row)
-        self.advanced = self._advanced_panel()
-        self.advanced.setVisible(False)
-        self.toggle.toggled.connect(self._toggle_advanced)
-        layout.addWidget(self.advanced, 1)
+        layout.addWidget(self._settings_panel(), 1)
 
         self.starter_check = QtWidgets.QCheckBox("Préparer une scène de départ avec les outils MKE")
         self.starter_check.setChecked(True)
@@ -157,14 +145,13 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         buttons.addWidget(self.create_button)
         layout.addLayout(buttons)
 
-        self.type_group.buttonClicked.connect(lambda *_: self._on_type_changed())
         for widget in (self.name_input, self.parent_input, self.other_input):
             widget.textChanged.connect(self._refresh_preview)
         self.other_input.textChanged.connect(self._refresh_folders)
-        self._on_type_changed()
+        self.type_group.buttons()[0].setChecked(True)  # fires _on_type_toggled
         return tab
 
-    def _advanced_panel(self):
+    def _settings_panel(self):
         panel = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(panel)
         form.setContentsMargins(0, 0, 0, 0)
@@ -207,16 +194,14 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         folders.addLayout(add_row)
         form.addRow("Dossiers", folders)
 
-        for spin in (self.fps, self.start, self.end, self.res_x, self.res_y):
-            spin.valueChanged.connect(self._refresh_summary)
         self.cache_input.textChanged.connect(self._refresh_folders)
-        self.cache_input.textChanged.connect(self._refresh_summary)
         return panel
 
-    def _toggle_advanced(self, shown):
-        self.advanced.setVisible(shown)
-        self.toggle.setText("Masquer" if shown else "Modifier")
-        QtCore.QTimer.singleShot(0, lambda: self.resize(self.width(), self.sizeHint().height() if shown else 560))
+    def _on_type_toggled(self, button, checked):
+        # Style set per button (not through a global :checked rule) so Houdini's own stylesheet cannot hide it
+        button.setStyleSheet(TYPE_CHECKED_STYLE if checked else TYPE_STYLE)
+        if checked:
+            self._on_type_changed()
 
     def project_type(self):
         type_ = self.type_group.checkedButton().property("type_value")
@@ -233,10 +218,6 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         self.res_y.setValue(settings["resolution"][1])
         self._refresh_folders()
         self._refresh_preview()
-
-    def _refresh_summary(self, *_):
-        self.summary.setText(f"{self.fps.value():g} fps  ·  frames {self.start.value()}-{self.end.value()}  ·  "
-                             f"{self.res_x.value()}x{self.res_y.value()}  ·  cache {self.cache_input.text() or '3D/CACHES'}")
 
     def _refresh_folders(self, *_):
         unchecked = set(self._folders(QtCore.Qt.Unchecked))
@@ -258,7 +239,6 @@ class ProjectSetupDialog(QtWidgets.QDialog):
             if folder in unchecked:
                 parent.setCheckState(0, QtCore.Qt.Unchecked)
         self.folder_tree.expandAll()
-        self._refresh_summary()
 
     def _folders(self, state=QtCore.Qt.Checked):
         """Leaf folder paths with the given check state."""
