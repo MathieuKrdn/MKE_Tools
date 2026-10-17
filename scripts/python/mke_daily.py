@@ -161,7 +161,10 @@ class DailyDialog(QtWidgets.QDialog):
 
     def _refresh(self, *_):
         path = self.out_path()
-        self.preview.setText(f"{os.path.basename(path)}\ndans {os.path.dirname(path)}")
+        folder = os.path.dirname(path)
+        short = folder if len(folder) < 60 else ".../" + "/".join(folder.split("/")[-3:])
+        self.preview.setText(f"{os.path.basename(path)}\ndans {short}")
+        self.preview.setToolTip(path)
         errors = []
         if not self.description.text().strip():
             errors.append("Ajoute une description.")
@@ -192,5 +195,5 @@ class DailyDialog(QtWidgets.QDialog):
         self.accept()
         hou.ui.setStatusMessage(f"Daily : {os.path.basename(path)}")
         if self.open_after.isChecked():
-            os.startfile(path) if sys.platform == "win32" else None
+            os.startfile(path)
 
