@@ -37,7 +37,12 @@ def main(scene, path, start, end, log_path):
     except hou.OperationFailed as error:
         print(f"ERREUR : {error}")
         raise SystemExit(1)
-    print(f"=== OK en {int(time.time() - started)} s")
+    try:  # outdated-cache detection (the post-render hook may not exist on older nodes)
+        import mke_cachestate
+        mke_cachestate.record(node)
+    except Exception as error:
+        print(f"cache fingerprint not saved: {error}")
+    print(f"=== OK in {int(time.time() - started)} s")
 
 
 if __name__ == "__main__":

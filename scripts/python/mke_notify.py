@@ -157,7 +157,14 @@ FRAME_RE = re.compile(r"([._])(-?\d+)(\.[^./\\]+(?:\.sc|\.gz)?)$")  # name.0012.
 
 def cache_done(node=None):
     node = _cache_node(node or hou.pwd())
-    if node is None or not node.evalParm("discord_notify"):
+    if node is None:
+        return
+    try:
+        import mke_cachestate
+        mke_cachestate.record(node)  # fingerprint for outdated-cache detection, Discord or not
+    except Exception as error:
+        print(f"[MKE] cache fingerprint not saved: {error}")
+    if not node.evalParm("discord_notify"):
         return
     started = node.cachedUserData(START_KEY)
     duration = str(datetime.timedelta(seconds=int(time.time() - started))) if started else "?"
