@@ -82,6 +82,7 @@ def _column(title, widget, *buttons):
 
 try:  # Qt Multimedia ships with Houdini 22 (PySide6); without it the preview falls back to the external player
     from PySide6 import QtMultimedia, QtMultimediaWidgets
+    from PySide6.QtCore import QLoggingCategory
 except ImportError:
     QtMultimedia = None
 
@@ -91,6 +92,7 @@ class VideoPlayer(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        QLoggingCategory.setFilterRules("qt.multimedia*=false")  # keep FFmpeg stream dumps out of the console
         self.video = QtMultimediaWidgets.QVideoWidget()
         self.video.setStyleSheet("background: black;")
         self.player = QtMultimedia.QMediaPlayer(self)

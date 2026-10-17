@@ -53,7 +53,8 @@ def encode(pattern, start_frame, fps, out_path):
     exe, codec = encoder()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     cmd = exe + ["-y", "-hide_banner", "-loglevel", "error", "-framerate", f"{fps:g}", "-start_number", str(start_frame),
-                 "-i", pattern, *codec, "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 "-i", pattern, *codec, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2:out_range=tv,format=yuv420p",
+                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                  "-r", f"{fps:g}", out_path]
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
