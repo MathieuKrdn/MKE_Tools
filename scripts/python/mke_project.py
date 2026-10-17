@@ -117,6 +117,14 @@ def apply_project(info, scene_settings=True):
         hou.setFrame(info["frame_start"])
 
 
+def apply_to_scene(info):
+    """Push edited project settings onto the open scene: variables, fps, and the shot or project frame range."""
+    apply_project(info, scene_settings=False)
+    hou.setFps(info["fps"])
+    shot = None if hou.hipFile.isNewFile() else shot_for_path(info, hou.hipFile.path())
+    apply_range(*(shot_range(info, shot) if shot else (info["frame_start"], info["frame_end"])))
+
+
 def on_scene_load():
     """Called by 456.py: re-point $JOB/$CACHE on the project the .hip lives in."""
     hip = hou.hipFile.path()

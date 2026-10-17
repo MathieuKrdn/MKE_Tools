@@ -116,11 +116,17 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.empty_projects = _label("Aucun projet récent.\nCrée-en un avec « + Nouveau projet » ou ouvre un dossier avec « Parcourir ».", "hint")
         browse = QtWidgets.QPushButton("Parcourir...")
         browse.clicked.connect(self._browse)
+        self.settings_button = QtWidgets.QPushButton("Réglages")
+        self.settings_button.setToolTip("Lire et modifier fps, frames, résolution, dossiers...")
+        self.settings_button.clicked.connect(self._edit_settings)
+        self.project_list.itemDoubleClicked.connect(lambda *_: self._edit_settings())
+        self.project_summary = _label("", "hint")
         projects_box = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(projects_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.project_list, 1)
         box.addWidget(self.empty_projects)
+        box.addWidget(self.project_summary)
 
         # 2. shots and assets
         self.entity_tree = QtWidgets.QTreeWidget()
@@ -154,7 +160,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.open_button.clicked.connect(self._open_version)
 
         splitter = QtWidgets.QSplitter()
-        splitter.addWidget(_column("Projets", projects_box, browse))
+        splitter.addWidget(_column("Projets", projects_box, browse, self.settings_button))
         splitter.addWidget(_column("Plans et assets", self.entity_tree, self.entity_button))
         splitter.addWidget(_column("Versions", versions_box, self.new_scene_button, None, self.open_button))
         splitter.setSizes([260, 240, 600])
@@ -215,6 +221,11 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.entity_tree.clear()
         info = self.selected_project()
         self.entity_button.setEnabled(bool(info))
+        self.settings_button.setEnabled(bool(info))
+        self.project_summary.setText(
+            f"{info['fps']:g} fps  ·  frames {info['frame_start']}-{info['frame_end']}  ·  "
+            f"{info['resolution'][0]}x{info['resolution'][1]}\nscènes : {mke_project.scenes_dir(info) or '(racine)'}"
+            f"  ·  cache : {info['cache']}" if info else "")
         if info:
             project = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Scènes du projet"])
             project.setData(0, QtCore.Qt.UserRole, ("project", {}))
@@ -308,6 +319,11 @@ class ProjectsDashboard(QtWidgets.QDialog):
             mke_project.add_recent(dialog.existing_root)
             self.refresh(select=dialog.existing_root)
 
+    def _edit_settings(self):
+        info = self.selected_project()
+        if info and ProjectSettingsDialog(info, self).exec_():
+            self.refresh(select=info["root"])
+
     def _edit_entities(self):
         info = self.selected_project()
         if info:
@@ -330,6 +346,119 @@ class ProjectsDashboard(QtWidgets.QDialog):
         hip = mke_project.new_entity_scene(info, entity[0], **entity[1])
         self.accept()
         hou.ui.setStatusMessage(f"Nouvelle scène : {os.path.basename(hip)}")
+
+
+# ==================================================================== project settings
+
+class ProjectSettingsDialog(QtWidgets.QDialog):
+    """Read and edit a project's project.json: name, type, timing, resolution, folders, OCIO."""
+
+    def __init__(self, info, parent=None):
+        super().__init__(parent)
+        self.info = info
+        self.setWindowTitle(f"Réglages  ·  {info['name']}")
+        self.setStyleSheet(STYLE)
+        self.resize(600, 0)
+        presets = mke_project.load_presets()
+
+        self.name_input = QtWidgets.QLineEdit(info["name"])
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.setEditable(True)
+        self.type_combo.addItems(list(presets["types"]))
+        self.type_combo.setCurrentText(info["type"])
+        self.fps = _spin(1, 240, info["fps"], double=True)
+        self.start = _spin(-100000, 100000, info["frame_start"])
+        self.end = _spin(-100000, 100000, info["frame_end"])
+        self.res_x = _spin(16, 16384, info["resolution"][0])
+        self.res_y = _spin(16, 16384, info["resolution"][1])
+        self.scenes_input = QtWidgets.QLineEdit(mke_project.scenes_dir(info))
+        self.scenes_input.setToolTip("Relatif au projet. Les fichiers ne sont pas déplacés, seul l'endroit où chercher change.")
+        self.cache_input = QtWidgets.QLineEdit(info["cache"])
+        self.ocio_input = QtWidgets.QLineEdit(info.get("ocio", ""))
+        self.ocio_input.setPlaceholderText("vide = config de Houdini")
+        frames = QtWidgets.QHBoxLayout()
+        frames.addWidget(self.start)
+        frames.addWidget(QtWidgets.QLabel("à"))
+        frames.addWidget(self.end)
+        self.duration = _label("", "hint")
+        self.duration.setWordWrap(False)
+        frames.addWidget(self.duration)
+        res = QtWidgets.QHBoxLayout()
+        res.addWidget(self.res_x)
+        res.addWidget(QtWidgets.QLabel("x"))
+        res.addWidget(self.res_y)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow(_section("Projet"))
+        form.addRow("Nom", self.name_input)
+        form.addRow("Type", self.type_combo)
+        folder = _label(info["root"] if len(info["root"]) < 60 else ".../" + "/".join(info["root"].split("/")[-2:]), "hint")
+        folder.setToolTip(info["root"])
+        form.addRow("Dossier", folder)
+        form.addRow("Créé", _label(f"{info.get('created', '?')} par {info.get('author', '?')}", "hint"))
+        form.addRow(_section("Temps et image"))
+        form.addRow("Images / seconde", self.fps)
+        form.addRow("Frames", frames)
+        form.addRow("Résolution", res)
+        form.addRow(_section("Dossiers"))
+        form.addRow("Scènes", self.scenes_input)
+        form.addRow("Cache ($CACHE)", self.cache_input)
+        form.addRow("OCIO", self.ocio_input)
+
+        self.apply_check = QtWidgets.QCheckBox("Appliquer aussi à la scène ouverte")
+        active = current_project()
+        self.apply_check.setVisible(bool(active and active["root"] == info["root"]))
+        self.apply_check.setChecked(True)
+
+        buttons = QtWidgets.QHBoxLayout()
+        buttons.addWidget(self.apply_check)
+        buttons.addStretch()
+        cancel = QtWidgets.QPushButton("Annuler")
+        cancel.clicked.connect(self.reject)
+        save = QtWidgets.QPushButton("Enregistrer")
+        save.setObjectName("primary")
+        save.setDefault(True)
+        save.clicked.connect(self._save)
+        buttons.addWidget(cancel)
+        buttons.addWidget(save)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+        for widget in (self.fps, self.start, self.end):
+            widget.valueChanged.connect(self._refresh_duration)
+        self._refresh_duration()
+
+    def _refresh_duration(self, *_):
+        frames = self.end.value() - self.start.value() + 1
+        self.duration.setText(f"{frames} frames  ·  {frames / self.fps.value():.1f} s" if frames > 0 else "")
+
+    def _save(self):
+        name = mke_project.sanitize_name(self.name_input.text())
+        type_ = mke_project.sanitize_name(self.type_combo.currentText()).upper()
+        if not name or not type_:
+            hou.ui.displayMessage("Le nom et le type ne peuvent pas être vides.", severity=hou.severityType.Warning)
+            return
+        if self.end.value() < self.start.value():
+            hou.ui.displayMessage("La fin doit être après le début.", severity=hou.severityType.Warning)
+            return
+        scenes = self.scenes_input.text().strip().replace("\\", "/").strip("/")
+        if not os.path.isdir(os.path.join(self.info["root"], scenes)):
+            hou.ui.displayMessage(f"Le dossier de scènes « {scenes} » n'existe pas dans le projet.",
+                                  severity=hou.severityType.Warning)
+            return
+        self.info.update({
+            "name": name, "type": type_, "fps": self.fps.value(),
+            "frame_start": self.start.value(), "frame_end": self.end.value(),
+            "resolution": [self.res_x.value(), self.res_y.value()],
+            "scenes": scenes, "cache": self.cache_input.text().strip().replace("\\", "/") or self.info["cache"],
+            "ocio": self.ocio_input.text().strip(),
+        })
+        mke_project.write_project(self.info)
+        if self.apply_check.isVisible() and self.apply_check.isChecked():
+            mke_project.apply_to_scene(self.info)
+        self.accept()
+        hou.ui.setStatusMessage(f"Réglages de {name} enregistrés")
 
 
 # ==================================================================== new project
