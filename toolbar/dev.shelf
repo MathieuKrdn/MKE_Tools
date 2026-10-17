@@ -52,7 +52,7 @@ import mke_usd_dependancy
 mke_usd_dependancy.main()
 ]]>
     </script>
-    <help>
+    <helpText>
 <![CDATA[
 USD Dependency Checker
 
@@ -70,7 +70,7 @@ Features:
 
 The tool will show a detailed report of all off-server dependencies with options to manage them.
 ]]>
-    </help>
+    </helpText>
   </tool>
 
   <tool name="usd_dependency_config" label="Configure Server Path" icon="BUTTONS_gear">
@@ -80,7 +80,7 @@ import mke_usd_dependancy
 mke_usd_dependancy.configure()
 ]]>
     </script>
-    <help>
+    <helpText>
 <![CDATA[
 Configure Server Path
 
@@ -94,6 +94,6 @@ Examples:
 
 Settings are saved persistently for future sessions.
 ]]>
-    </help>
+    </helpText>
   </tool>
 </shelfDocument>
