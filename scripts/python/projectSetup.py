@@ -80,6 +80,88 @@ def _column(title, widget, *buttons):
     return column
 
 
+try:  # Qt Multimedia ships with Houdini 22 (PySide6); without it the preview falls back to the external player
+    from PySide6 import QtMultimedia, QtMultimediaWidgets
+except ImportError:
+    QtMultimedia = None
+
+
+class VideoPlayer(QtWidgets.QWidget):
+    """Inline preview: loops muted as soon as a video is loaded, click or space to pause."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.video = QtMultimediaWidgets.QVideoWidget()
+        self.video.setStyleSheet("background: black;")
+        self.player = QtMultimedia.QMediaPlayer(self)
+        self.audio = QtMultimedia.QAudioOutput(self)
+        self.audio.setMuted(True)
+        self.player.setAudioOutput(self.audio)
+        self.player.setVideoOutput(self.video)
+        self.player.setLoops(QtMultimedia.QMediaPlayer.Infinite)
+
+        self.play_button = QtWidgets.QToolButton()
+        self.play_button.clicked.connect(self.toggle)
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.sliderMoved.connect(self.player.setPosition)
+        self.time = QtWidgets.QLabel("0:00 / 0:00")
+        self.time.setStyleSheet("color: #8a8a8a;")
+        self.mute_button = QtWidgets.QToolButton()
+        self.mute_button.setText("Son")
+        self.mute_button.setCheckable(True)
+        self.mute_button.toggled.connect(lambda on: self.audio.setMuted(not on))
+
+        controls = QtWidgets.QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.addWidget(self.play_button)
+        controls.addWidget(self.slider, 1)
+        controls.addWidget(self.time)
+        controls.addWidget(self.mute_button)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(self.video, 1)
+        layout.addLayout(controls)
+
+        self.player.positionChanged.connect(self._on_position)
+        self.player.durationChanged.connect(lambda d: self.slider.setRange(0, d))
+        self.player.playbackStateChanged.connect(self._on_state)
+        self._on_state()
+
+    def load(self, path):
+        self.player.setSource(QtCore.QUrl.fromLocalFile(path))
+        self.player.play()
+
+    def stop(self):
+        self.player.stop()
+        self.player.setSource(QtCore.QUrl())
+
+    def toggle(self):
+        if self.player.playbackState() == QtMultimedia.QMediaPlayer.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def mousePressEvent(self, event):
+        self.toggle()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Space:
+            self.toggle()
+        else:
+            super().keyPressEvent(event)
+
+    def _on_state(self, *_):
+        playing = self.player.playbackState() == QtMultimedia.QMediaPlayer.PlayingState
+        self.play_button.setText("Pause" if playing else "Lecture")
+
+    def _on_position(self, position):
+        if not self.slider.isSliderDown():
+            self.slider.setValue(position)
+        fmt = lambda ms: f"{ms // 60000}:{ms // 1000 % 60:02d}"
+        self.time.setText(f"{fmt(position)} / {fmt(self.player.duration())}")
+
+
 def _confirm_discard():
     return not hou.hipFile.hasUnsavedChanges() or hou.ui.displayMessage(
         "La scène ouverte a des changements non sauvegardés.",
@@ -172,19 +254,25 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.media_list.itemDoubleClicked.connect(lambda *_: self._play_media())
         self.media_preview = QtWidgets.QLabel()
         self.media_preview.setAlignment(QtCore.Qt.AlignCenter)
-        self.media_preview.setFixedHeight(200)
         self.media_preview.setStyleSheet(self.thumbnail.styleSheet())
+        self.video_player = VideoPlayer() if QtMultimedia else None
+        self.preview_stack = QtWidgets.QStackedWidget()
+        self.preview_stack.setFixedHeight(280)
+        self.preview_stack.addWidget(self.media_preview)
+        if self.video_player:
+            self.preview_stack.addWidget(self.video_player)
         media_box = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(media_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.media_list, 1)
-        box.addWidget(self.media_preview)
+        box.addWidget(self.preview_stack)
         folder_button = QtWidgets.QPushButton("Ouvrir le dossier")
         folder_button.clicked.connect(self._open_media_folder)
         daily_button = QtWidgets.QPushButton("+ Daily flipbook")
         daily_button.setToolTip("Flipbook du viewport en mp4, nommé selon la convention du projet")
         daily_button.clicked.connect(self._daily)
-        self.play_button = QtWidgets.QPushButton("Lire")
+        self.play_button = QtWidgets.QPushButton("Ouvrir dans le lecteur")
+        self.play_button.setToolTip("Vidéos : ton lecteur vidéo. Séquences : MPlay.")
         self.play_button.setObjectName("primary")
         self.play_button.clicked.connect(self._play_media)
         media_page = _column("", media_box, folder_button, daily_button, None, self.play_button)
@@ -345,6 +433,13 @@ class ProjectsDashboard(QtWidgets.QDialog):
 
     def _refresh_media_preview(self):
         media = self.selected_media()
+        if self.video_player:
+            if media and media["kind"] == "Vidéo":
+                self.preview_stack.setCurrentWidget(self.video_player)
+                self.video_player.load(media["path"])
+                return
+            self.video_player.stop()
+            self.preview_stack.setCurrentWidget(self.media_preview)
         first = media["first"] if media else ""
         pixmap = QtGui.QPixmap(first) if first.lower().endswith((".png", ".jpg", ".jpeg")) else QtGui.QPixmap()
         if pixmap.isNull():
@@ -352,7 +447,17 @@ class ProjectsDashboard(QtWidgets.QDialog):
             self.media_preview.setText("Double-clic pour lire" if media else
                                        "Aucun média : « + Daily flipbook » en crée un depuis le viewport")
         else:
-            self.media_preview.setPixmap(pixmap.scaled(356, 200, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            self.media_preview.setPixmap(pixmap.scaled(500, 280, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+
+    def done(self, result):
+        if self.video_player:
+            self.video_player.stop()  # release the file and the decoder when the dashboard closes
+        super().done(result)
+
+    def closeEvent(self, event):
+        if self.video_player:
+            self.video_player.stop()
+        super().closeEvent(event)
 
     def _play_media(self):
         media = self.selected_media()
