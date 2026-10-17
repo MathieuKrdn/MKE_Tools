@@ -163,10 +163,20 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.startup_check.setChecked(mke_project.get_pref("open_at_startup", True))
         self.startup_check.toggled.connect(lambda on: mke_project.set_pref("open_at_startup", on))
 
+        self.autosave_check = QtWidgets.QCheckBox(f"Sauvegarde auto toutes les {mke_project.AUTOSAVE_MINUTES} min")
+        self.autosave_check.setToolTip("Copie dans autosave/<scène>_autosave.hip, sans toucher à ta scène ni à ses versions")
+        self.autosave_check.setChecked(mke_project.get_pref("autosave", True))
+        self.autosave_check.toggled.connect(mke_project.set_autosave)
+        options = QtWidgets.QHBoxLayout()
+        options.addWidget(self.startup_check)
+        options.addSpacing(16)
+        options.addWidget(self.autosave_check)
+        options.addStretch()
+
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(header)
         layout.addWidget(splitter, 1)
-        layout.addWidget(self.startup_check)
+        layout.addLayout(options)
         self.refresh()
 
     # ---------------------------------------------------------------- data

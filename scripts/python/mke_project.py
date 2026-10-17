@@ -391,6 +391,16 @@ def list_versions(folder):
             "user": info.get("user", ""), "comment": info.get("comment", ""),
             "thumb": thumb if os.path.isfile(thumb) else None,
         })
+    autosaves = os.path.join(folder, AUTOSAVE_DIR)
+    for name in os.listdir(autosaves) if os.path.isdir(autosaves) else []:
+        if name.endswith(HIP_EXT):
+            path = _slash(os.path.join(autosaves, name))
+            mtime = os.path.getmtime(path)
+            versions.append({
+                "path": path, "file": name, "mtime": mtime, "version": "auto",
+                "date": datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"), "user": "",
+                "comment": f"Sauvegarde auto de {name.replace(AUTOSAVE_SUFFIX, '')}", "thumb": None,
+            })
     return sorted(versions, key=lambda v: v["mtime"], reverse=True)
 
 
@@ -456,13 +466,89 @@ def new_entity_scene(info, kind="project", keep_scene=False, starter=True, **nam
 
 def open_scene(hip):
     hou.hipFile.load(hip, suppress_save_prompt=True, ignore_load_warnings=True)
+    original = autosave_source(hip)
+    if original:
+        # Recovered autosave: point the session at the next free version next to the original,
+        # so Ctrl+S never writes back into autosave/ nor over a real version.
+        hou.hipFile.setName(free_version_path(version_up_path(original)))
     info = on_scene_load()  # 456.py also does it in Houdini; explicit so it works everywhere
     if info:
         add_recent(info["root"])
     return info
 
 
+# ---------------------------------------------------------------- autosave
+
+AUTOSAVE_DIR = "autosave"
+AUTOSAVE_SUFFIX = "_autosave"
+AUTOSAVE_MINUTES = 15
+_autosave_timer = None
+
+
+def autosave_path(hip=None):
+    """scenes/shot_v0003.hip -> scenes/autosave/shot_v0003_autosave.hip (untitled scenes go to the prefs folder)."""
+    if hip is None:
+        hip = None if hou.hipFile.isNewFile() else hou.hipFile.path()
+    if hip:
+        folder, name = os.path.split(hip)
+        folder = os.path.join(folder, AUTOSAVE_DIR)
+    else:
+        folder = os.path.join(hou.getenv("HOUDINI_USER_PREF_DIR") or os.path.expanduser("~"), AUTOSAVE_DIR)
+        name = "untitled" + os.path.splitext(hou.hipFile.path())[1]
+    stem, ext = os.path.splitext(name)
+    return _slash(os.path.join(folder, stem + AUTOSAVE_SUFFIX + ext))
+
+
+def autosave_source(path):
+    """The scene an autosave file was made from, or None if path is not an autosave."""
+    folder, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    if os.path.basename(folder) != AUTOSAVE_DIR or not stem.endswith(AUTOSAVE_SUFFIX):
+        return None
+    return _slash(os.path.join(os.path.dirname(folder), stem[:-len(AUTOSAVE_SUFFIX)] + ext))
+
+
+def autosave():
+    """Write a copy of the session to its _autosave file. The open scene keeps its name and its unsaved state.
+    One autosave per scene version, overwritten each time. Returns the path, or None when there was nothing to save."""
+    if hou.hipFile.isLoadingHipFile() or hou.hipFile.isShuttingDown() or not hou.hipFile.hasUnsavedChanges():
+        return None
+    target = autosave_path()
+    backup = hou.hipFile.saveAsBackup()  # writes $HIP/backup/<name>_bakN without renaming the session
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    os.replace(backup, target)
+    try:
+        os.rmdir(os.path.dirname(backup))  # only removes backup/ if we were its only user
+    except OSError:
+        pass
+    return target
+
+
+def _autosave_tick():
+    try:
+        path = autosave()
+        if path:
+            hou.ui.setStatusMessage(f"Autosave : {os.path.basename(path)}")
+    except Exception as error:  # never interrupt the artist for an autosave
+        hou.ui.setStatusMessage(f"Autosave impossible : {error}", severity=hou.severityType.Warning)
+
+
+def set_autosave(enabled):
+    """Start or stop the 15 minutes autosave timer and remember the choice."""
+    global _autosave_timer
+    set_pref("autosave", bool(enabled))
+    if _autosave_timer is not None:
+        _autosave_timer.stop()
+        _autosave_timer = None
+    if enabled and hou.isUIAvailable():
+        from hutil.Qt import QtCore
+        _autosave_timer = QtCore.QTimer()
+        _autosave_timer.timeout.connect(_autosave_tick)
+        _autosave_timer.start(AUTOSAVE_MINUTES * 60 * 1000)
+
+
 def startup():
-    """Houdini start (pythonrc.py): Manual update mode so heavy scenes do not cook on open."""
+    """Houdini start (pythonrc.py): Manual update mode so heavy scenes do not cook on open, and autosave."""
     if hou.isUIAvailable():
         hou.setUpdateMode(hou.updateMode.Manual)
+        set_autosave(get_pref("autosave", True))
