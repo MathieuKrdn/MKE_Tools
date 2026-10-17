@@ -317,6 +317,9 @@ def submit_from_menu(node, tonight):
                                  buttons=("Enregistrer et envoyer", "Annuler"), default_choice=0, close_choice=1) != 0:
             return
         hou.hipFile.save()
+    import mke_check
+    if not mke_check.report(mke_check.check([node]), title=f"Avant l'envoi de {node.name()} à Deadline"):
+        return
     try:
         entry = submit(node, tonight=tonight)
     except Exception as error:
