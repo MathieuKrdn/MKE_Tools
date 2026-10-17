@@ -40,7 +40,8 @@ def run(*args, timeout=60):
     if not exe:
         raise RuntimeError("deadlinecommand introuvable : Deadline n'est pas installé sur ce poste.")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    result = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=timeout, creationflags=flags)
+    result = subprocess.run([exe, *map(str, args)], capture_output=True, encoding="utf-8", errors="replace",
+                            timeout=timeout, creationflags=flags)  # deadlinecommand speaks UTF-8, not the Windows codepage
     return result.stdout
 
 
