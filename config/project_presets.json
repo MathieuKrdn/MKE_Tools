@@ -1,0 +1,45 @@
+{
+    "cache": "3D/CACHES",
+    "base_folders": [
+        "{cache}",
+        "3D/SCENES",
+        "USD",
+        "PIPELINE",
+        "REFERENCES",
+        "_DAILIES",
+        "IN/ASSETS",
+        "IN/PROPS",
+        "IN/CHARACTERS",
+        "IN/ENVIRONMENT",
+        "IN/CAMERAS",
+        "IN/TEXTURES",
+        "OUT/{type}"
+    ],
+    "defaults": {
+        "fps": 24,
+        "frame_start": 1001,
+        "frame_end": 1100,
+        "resolution": [1920, 1080],
+        "ocio": ""
+    },
+    "types": {
+        "ASSET": {"folders": ["OUT/{type}/TURNTABLE"]},
+        "CHARACTER": {"folders": ["OUT/{type}/TURNTABLE"]},
+        "ENVIRONMENT": {"folders": []},
+        "FX": {"folders": ["3D/SIM"], "frame_end": 1240},
+        "RND": {"folders": ["3D/TESTS"], "frame_end": 1050}
+    },
+    "shot_folders": [
+        "3D/SCENES/{seq}/{shot}",
+        "{cache}/{seq}/{shot}",
+        "USD/SHOTS/{seq}/{shot}",
+        "OUT/{type}/{seq}/{shot}",
+        "_DAILIES/{seq}/{shot}"
+    ],
+    "asset_folders": [
+        "IN/ASSETS/{asset}/MODEL",
+        "IN/ASSETS/{asset}/TEXTURES",
+        "3D/SCENES/ASSETS/{asset}",
+        "USD/ASSETS/{asset}"
+    ]
+}
