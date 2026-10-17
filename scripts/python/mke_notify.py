@@ -1,4 +1,4 @@
-"""Discord notifications for MKE nodes (File Cache Discord).
+"""Discord notifications: Houdini's own File Cache (via scripts/sop/filecache-2.0_OnCreated.py) and Daily flipbooks.
 
 The webhook URL is personal: it is read from $MKE_DISCORD_WEBHOOK or from mke_projects_prefs.json,
 where configure() stores what the user pastes. It never lives in a scene or in this package.
@@ -17,8 +17,9 @@ import hou
 
 import mke_project
 
-NODE_TYPE_PREFIX = "MKE::filecache_discord"
 START_KEY = "mke_cache_start"
+PRE_SCRIPT = "import mke_notify; mke_notify.cache_started(hou.pwd())"
+POST_SCRIPT = "import mke_notify; mke_notify.cache_done(hou.pwd())"
 
 
 def webhook_url():
@@ -86,10 +87,48 @@ def _embed(title, description, fields, color=0x3D9A50):
 # ---------------------------------------------------------------- File Cache hooks
 
 def _cache_node(node):
-    """Pre/post-render scripts run on the File Cache's internal ROP: walk up to our node."""
-    while node is not None and not node.type().name().startswith(NODE_TYPE_PREFIX):
+    """Pre/post-render scripts run on the File Cache's internal ROP: walk up to the node carrying the Discord toggle."""
+    while node is not None and node.parm("discord_notify") is None:
         node = node.parent()
     return node
+
+
+def setup_filecache(node):
+    """Turn a normal File Cache into a notifying one: a 'Discord' tab of spare parms + pre/post-render scripts.
+    Scripts the user already wrote are kept: we only fill empty slots. Returns True if the node was changed."""
+    if node.parm("discord_notify") is not None:
+        return False
+    group = node.parmTemplateGroup()
+    folder = hou.FolderParmTemplate("discord", "Discord", folder_type=hou.folderType.Tabs)
+    folder.addParmTemplate(hou.ToggleParmTemplate("discord_notify", "Notifier sur Discord", default_value=True,
+                                                  help="Message sur ton serveur Discord à la fin du cache."))
+    folder.addParmTemplate(hou.StringParmTemplate("discord_message", "Message", 1, default_value=("",),
+                                                  help="Texte ajouté à la notification (optionnel)."))
+    folder.addParmTemplate(hou.ButtonParmTemplate(
+        "discord_test", "Envoyer un test", script_callback_language=hou.scriptLanguage.Python,
+        script_callback="import mke_notify; mke_notify.send('Test depuis ' + kwargs['node'].path(), wait=True)"))
+    group.append(folder)
+    node.setParmTemplateGroup(group)
+    for toggle, script, lang, code in (("tprerender", "prerender", "lprerender", PRE_SCRIPT),
+                                       ("tpostrender", "postrender", "lpostrender", POST_SCRIPT)):
+        if node.parm(script) is None or node.parm(script).eval().strip():
+            continue  # not a File Cache, or the user already has a script there
+        node.parm(script).set(code)
+        node.parm(lang).set("python")
+        node.parm(toggle).set(True)
+    return True
+
+
+def is_filecache(node):
+    return node.type().nameComponents()[2] == "filecache"
+
+
+def setup_scene_filecaches():
+    """Menu action: add Discord notifications to every File Cache already in the scene."""
+    nodes = [n for n in hou.node("/").allSubChildren() if is_filecache(n)]
+    changed = [n for n in nodes if setup_filecache(n)]
+    hou.ui.displayMessage(f"{len(changed)} File Cache configurés pour Discord ({len(nodes) - len(changed)} l'étaient déjà).")
+    return changed
 
 
 def _size(path):
