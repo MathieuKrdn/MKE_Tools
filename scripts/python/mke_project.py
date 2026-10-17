@@ -119,6 +119,9 @@ def on_scene_load():
     info = find_project(os.path.dirname(hip))
     if info:
         apply_project(info, scene_settings=False)
+        shot = shot_for_path(info, hip)
+        if shot:
+            apply_range(*shot_range(info, shot))
     return info
 
 
@@ -205,6 +208,7 @@ def create_project(parent, name, type_, folders, settings, cache, keep_scene=Fal
         build_starter_scene(info)
     hip = free_version_path(_slash(os.path.join(root, SCENES_DIR, scene_name(info))))
     hou.hipFile.save(hip)
+    record_version(hip, "Création du projet")
     add_recent(root)
     return info, hip
 
@@ -268,8 +272,9 @@ def build_starter_scene(info):
     return made
 
 
-def add_entity(info, kind, **names):
-    """kind 'shot' (seq=, shot=) or 'asset' (asset=). Creates its folders and records it in project.json."""
+def add_entity(info, kind, frame_range=None, **names):
+    """kind 'shot' (seq=, shot=) or 'asset' (asset=). Creates its folders and records it in project.json.
+    For a shot, frame_range (start, end) is stored; calling again on an existing shot updates it."""
     names = {k: sanitize_name(v) for k, v in names.items()}
     if not all(names.values()):
         raise ValueError("Nom vide.")
@@ -282,16 +287,156 @@ def add_entity(info, kind, **names):
     entry = "/".join(names.values())
     if entry not in info[f"{kind}s"]:
         info[f"{kind}s"].append(entry)
-        write_project(info)
+    if kind == "shot":
+        info.setdefault("shot_ranges", {})[entry] = list(frame_range or shot_range(info, entry))
+    write_project(info)
     return created
 
 
-def add_shot(info, seq, shot):
-    return add_entity(info, "shot", seq=seq, shot=shot)
+def add_shot(info, seq, shot, frame_range=None):
+    return add_entity(info, "shot", frame_range, seq=seq, shot=shot)
 
 
 def add_asset(info, asset):
     return add_entity(info, "asset", asset=asset)
+
+
+# ---------------------------------------------------------------- shot ranges
+
+def shot_range(info, shot):
+    """(start, end) of a 'seq/shot', falling back on the project range."""
+    return tuple(info.get("shot_ranges", {}).get(shot, (info["frame_start"], info["frame_end"])))
+
+
+def apply_range(start, end):
+    hou.playbar.setFrameRange(start, end)
+    hou.playbar.setPlaybackRange(start, end)
+    if not start <= hou.frame() <= end:
+        hou.setFrame(start)
+
+
+def shot_for_path(info, hip):
+    """'seq/shot' if the .hip lives in 3D/SCENES/seq/shot, else None."""
+    rel = _slash(os.path.relpath(os.path.dirname(hip), os.path.join(info["root"], SCENES_DIR)))
+    return rel if rel in info["shots"] else None
+
+
+# ---------------------------------------------------------------- scene versions (browser)
+
+VERSIONS_FILE = "_versions.json"
+THUMBS_DIR = ".thumbs"
+HIP_EXT = (".hip", ".hiplc", ".hipnc")
+
+
+def entity_dir(info, kind="project", **names):
+    """Scene folder of the project root, a shot (seq=, shot=) or an asset (asset=)."""
+    sub = {"project": "", "shot": "{seq}/{shot}", "asset": "ASSETS/{asset}"}[kind].format(**names)
+    return _slash(os.path.join(info["root"], SCENES_DIR, sub)).rstrip("/")
+
+
+def _read_versions(folder):
+    try:
+        with open(os.path.join(folder, VERSIONS_FILE), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def thumbnail_path(hip):
+    folder, name = os.path.split(hip)
+    return _slash(os.path.join(folder, THUMBS_DIR, os.path.splitext(name)[0] + ".jpg"))
+
+
+def list_versions(folder):
+    """Scenes directly in folder, newest first, with their comment, author, date and thumbnail."""
+    if not os.path.isdir(folder):
+        return []
+    meta = _read_versions(folder)
+    versions = []
+    for name in os.listdir(folder):
+        if not name.endswith(HIP_EXT):
+            continue
+        path = _slash(os.path.join(folder, name))
+        info = meta.get(name, {})
+        match = VERSION_RE.search(os.path.splitext(name)[0])
+        mtime = os.path.getmtime(path)
+        thumb = thumbnail_path(path)
+        versions.append({
+            "path": path, "file": name, "mtime": mtime,
+            "version": f"v{int(match.group(1)):04d}" if match else "-",
+            "date": info.get("date") or datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+            "user": info.get("user", ""), "comment": info.get("comment", ""),
+            "thumb": thumb if os.path.isfile(thumb) else None,
+        })
+    return sorted(versions, key=lambda v: v["mtime"], reverse=True)
+
+
+def record_version(hip, comment=""):
+    """Store author, date and comment of a saved scene, and grab a viewport thumbnail when there is a UI."""
+    folder, name = os.path.split(hip)
+    meta = _read_versions(folder)
+    meta[name] = {"comment": comment, "user": user_trigram(),
+                  "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    with open(os.path.join(folder, VERSIONS_FILE), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=4, ensure_ascii=False)
+    capture_thumbnail(hip)
+
+
+def capture_thumbnail(hip):
+    """One-frame flipbook of the current viewport. Silently skipped without a Scene Viewer (hython)."""
+    if not hou.isUIAvailable():
+        return None
+    try:
+        viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
+        if viewer is None:
+            return None
+        path = thumbnail_path(hip)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        settings = viewer.flipbookSettings().stash()
+        settings.frameRange((hou.frame(), hou.frame()))
+        settings.output(path)
+        settings.outputToMPlay(False)
+        settings.useResolution(True)
+        settings.resolution((480, 270))
+        viewer.flipbook(viewer.curViewport(), settings)
+        return path
+    except Exception:  # a thumbnail must never block a save
+        return None
+
+
+def save_version(comment=""):
+    """Save Up: next free version of the current scene, with its comment."""
+    new_path = free_version_path(version_up_path(hou.hipFile.path()))
+    hou.hipFile.save(new_path)
+    record_version(new_path, comment)
+    return new_path
+
+
+def new_entity_scene(info, kind="project", keep_scene=False, starter=True, **names):
+    """New scene of a shot / asset / the project, in its folder, with the shot range applied."""
+    names = {k: sanitize_name(v) for k, v in names.items()}
+    folder = entity_dir(info, kind, **names)
+    os.makedirs(folder, exist_ok=True)
+    hip = free_version_path(_slash(os.path.join(folder, scene_name(info, *names.values()))))
+    if not keep_scene:
+        hou.hipFile.clear(suppress_save_prompt=True)
+    apply_project(info)
+    if kind == "shot":
+        apply_range(*shot_range(info, "/".join(names.values())))
+    if starter and not keep_scene:
+        build_starter_scene(info)
+    hou.hipFile.save(hip)
+    record_version(hip, "Nouvelle scène")
+    add_recent(info["root"])
+    return hip
+
+
+def open_scene(hip):
+    hou.hipFile.load(hip, suppress_save_prompt=True, ignore_load_warnings=True)
+    info = on_scene_load()  # 456.py also does it in Houdini; explicit so it works everywhere
+    if info:
+        add_recent(info["root"])
+    return info
 
 
 def startup():

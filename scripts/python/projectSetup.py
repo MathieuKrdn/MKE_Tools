@@ -2,7 +2,7 @@
 import os
 
 import hou
-from hutil.Qt import QtCore, QtWidgets
+from hutil.Qt import QtCore, QtGui, QtWidgets
 
 import mke_project
 
@@ -65,14 +65,14 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("MKE Project Setup")
         self.setStyleSheet(STYLE)
-        self.resize(580, 860)
+        self.resize(760, 860)
         self.presets = mke_project.load_presets()
         self.custom_folders = []
 
         self.active = _label("", "active")
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._create_tab(), "Créer")
-        self.tabs.addTab(self._open_tab(), "Ouvrir")
+        self.tabs.addTab(self._open_tab(), "Scènes")
         self.tabs.addTab(self._entities_tab(), "Plans et assets")
         self.tabs.currentChanged.connect(self._refresh_active)
 
@@ -292,9 +292,13 @@ class ProjectSetupDialog(QtWidgets.QDialog):
                 self.cache_input.text().strip() or self.presets["cache"],
                 keep_scene=self.keep_check.isChecked(), starter=self.starter_check.isChecked())
         except FileExistsError as existing:
-            if hou.ui.displayMessage(f"Ce projet existe déjà :\n{existing}", buttons=("L'ouvrir", "Annuler"),
+            if hou.ui.displayMessage(f"Ce projet existe déjà :\n{existing}", buttons=("Voir ses scènes", "Annuler"),
                                      close_choice=1) == 0:
-                self._open(str(existing))
+                root = str(existing).replace("\\", "/")
+                mke_project.add_recent(root)
+                self._fill_projects(select=root)
+                self._refresh_browser()
+                self.tabs.setCurrentIndex(1)
             return
         except Exception as error:
             hou.ui.displayMessage(f"La création a échoué : {error}", severity=hou.severityType.Error)
@@ -302,56 +306,156 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         self.accept()
         hou.ui.setStatusMessage(f"Projet {info['name']} créé, scène {os.path.basename(hip)} ouverte.")
 
-    # ------------------------------------------------------------ open
+    # ------------------------------------------------------------ scene browser
     def _open_tab(self):
         tab = QtWidgets.QWidget()
-        self.search = QtWidgets.QLineEdit()
-        self.search.setPlaceholderText("Rechercher un projet")
-        self.search.textChanged.connect(self._filter_recent)
-        self.recent_list = QtWidgets.QListWidget()
-        self.recent_list.setSpacing(2)
-        self.recent_list.setTextElideMode(QtCore.Qt.ElideMiddle)
-        self.recent_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.recent_list.setWordWrap(False)
-        for root in mke_project.recent_projects():
-            info = mke_project.read_project(root)
-            item = QtWidgets.QListWidgetItem(f"{info['name']}   ·   {info['type']}\n{root}")
-            item.setData(QtCore.Qt.UserRole, root)
-            item.setToolTip(root)
-            self.recent_list.addItem(item)
-        if self.recent_list.count():
-            self.recent_list.setCurrentRow(0)
-        self.recent_list.itemDoubleClicked.connect(lambda item: self._open(item.data(QtCore.Qt.UserRole)))
 
-        empty = _label("Aucun projet récent. Utilise « Parcourir » pour en ouvrir un.", "hint")
-        empty.setVisible(not self.recent_list.count())
+        self.project_combo = QtWidgets.QComboBox()
+        self.project_combo.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         browse = QtWidgets.QPushButton("Parcourir...")
         browse.clicked.connect(self._browse_open)
-        open_button = QtWidgets.QPushButton("Ouvrir")
-        open_button.setObjectName("primary")
-        open_button.clicked.connect(self._open_selected)
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(QtWidgets.QLabel("Projet"))
+        top.addWidget(self.project_combo, 1)
+        top.addWidget(browse)
+
+        self.browser_tree = QtWidgets.QTreeWidget()
+        self.browser_tree.setHeaderHidden(True)
+        self.browser_tree.currentItemChanged.connect(lambda *_: self._refresh_versions())
+
+        self.version_list = QtWidgets.QTreeWidget()
+        self.version_list.setHeaderLabels(["Version", "Date", "Auteur", "Commentaire"])
+        self.version_list.setRootIsDecorated(False)
+        self.version_list.setAlternatingRowColors(True)
+        self.version_list.header().setStretchLastSection(True)
+        self.version_list.currentItemChanged.connect(lambda *_: self._refresh_thumbnail())
+        self.version_list.itemDoubleClicked.connect(lambda *_: self._open_version())
+
+        self.thumbnail = QtWidgets.QLabel("Pas d'aperçu")
+        self.thumbnail.setAlignment(QtCore.Qt.AlignCenter)
+        self.thumbnail.setFixedHeight(180)
+        self.thumbnail.setObjectName("hint")
+        self.thumbnail.setStyleSheet("border: 1px solid rgba(255, 255, 255, 30); border-radius: 4px;")
+
+        right = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(self.version_list, 1)
+        right_layout.addWidget(self.thumbnail)
+        splitter = QtWidgets.QSplitter()
+        splitter.addWidget(self.browser_tree)
+        splitter.addWidget(right)
+        splitter.setSizes([200, 480])
+
+        new_button = QtWidgets.QPushButton("Nouvelle scène ici")
+        new_button.setToolTip("Crée la v0001 de ce plan / asset dans son dossier, avec sa plage de frames")
+        new_button.clicked.connect(self._new_scene)
+        self.open_button = QtWidgets.QPushButton("Ouvrir la version")
+        self.open_button.setObjectName("primary")
+        self.open_button.clicked.connect(self._open_version)
         buttons = QtWidgets.QHBoxLayout()
-        buttons.addWidget(browse)
+        buttons.addWidget(new_button)
         buttons.addStretch()
-        buttons.addWidget(open_button)
+        buttons.addWidget(self.open_button)
 
         layout = QtWidgets.QVBoxLayout(tab)
-        layout.addWidget(self.search)
-        layout.addWidget(self.recent_list)
-        layout.addWidget(empty)
-        layout.addWidget(_label("Ouvre la dernière scène du projet et remet $JOB et $CACHE.", "hint"))
+        layout.addLayout(top)
+        layout.addWidget(splitter, 1)
         layout.addLayout(buttons)
+
+        self._fill_projects()
+        self.project_combo.currentIndexChanged.connect(lambda *_: self._refresh_browser())
+        self._refresh_browser()
         return tab
 
-    def _filter_recent(self, text):
-        for i in range(self.recent_list.count()):
-            item = self.recent_list.item(i)
-            item.setHidden(text.lower() not in item.text().lower())
+    def _fill_projects(self, select=None):
+        current = self.current_project()
+        roots = mke_project.recent_projects()
+        if current and current["root"] not in roots:
+            roots.insert(0, current["root"])
+        select = select or (current["root"] if current else None)
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        for root in roots:
+            info = mke_project.read_project(root)
+            self.project_combo.addItem(f"{info['name']}  ·  {info['type']}", root)
+            self.project_combo.setItemData(self.project_combo.count() - 1, root, QtCore.Qt.ToolTipRole)
+        if select in roots:
+            self.project_combo.setCurrentIndex(roots.index(select))
+        self.project_combo.blockSignals(False)
 
-    def _open_selected(self):
-        item = self.recent_list.currentItem()
-        if item and not item.isHidden():
-            self._open(item.data(QtCore.Qt.UserRole))
+    def browser_project(self):
+        root = self.project_combo.currentData()
+        return mke_project.read_project(root) if root else None
+
+    def _refresh_browser(self):
+        self.browser_tree.clear()
+        info = self.browser_project()
+        if not info:
+            self._refresh_versions()
+            return
+        project = QtWidgets.QTreeWidgetItem(self.browser_tree, ["Scènes du projet"])
+        project.setData(0, QtCore.Qt.UserRole, ("project", {}))
+        shots = QtWidgets.QTreeWidgetItem(self.browser_tree, ["Plans"])
+        sequences = {}
+        for entry in info["shots"]:
+            seq, shot = entry.split("/")
+            if seq not in sequences:
+                sequences[seq] = QtWidgets.QTreeWidgetItem(shots, [seq])
+            start, end = mke_project.shot_range(info, entry)
+            item = QtWidgets.QTreeWidgetItem(sequences[seq], [f"{shot}    {start}-{end}"])
+            item.setData(0, QtCore.Qt.UserRole, ("shot", {"seq": seq, "shot": shot}))
+        assets = QtWidgets.QTreeWidgetItem(self.browser_tree, ["Assets"])
+        for asset in info["assets"]:
+            item = QtWidgets.QTreeWidgetItem(assets, [asset])
+            item.setData(0, QtCore.Qt.UserRole, ("asset", {"asset": asset}))
+        self.browser_tree.expandAll()
+        self._select_current_scene(info) or self.browser_tree.setCurrentItem(project)
+
+    def _select_current_scene(self, info):
+        """Pre-select the entity of the scene that is open, if it belongs to this project."""
+        hip = hou.hipFile.path()
+        folder = os.path.dirname(hip).replace("\\", "/")
+        iterator = QtWidgets.QTreeWidgetItemIterator(self.browser_tree)
+        while iterator.value():
+            item = iterator.value()
+            entity = item.data(0, QtCore.Qt.UserRole)
+            if entity and mke_project.entity_dir(info, entity[0], **entity[1]) == folder:
+                self.browser_tree.setCurrentItem(item)
+                return True
+            iterator += 1
+        return False
+
+    def selected_entity(self):
+        item = self.browser_tree.currentItem()
+        return item.data(0, QtCore.Qt.UserRole) if item else None
+
+    def _refresh_versions(self):
+        self.version_list.clear()
+        info, entity = self.browser_project(), self.selected_entity()
+        if info and entity:
+            for version in mke_project.list_versions(mke_project.entity_dir(info, entity[0], **entity[1])):
+                item = QtWidgets.QTreeWidgetItem([version["version"], version["date"], version["user"], version["comment"]])
+                item.setData(0, QtCore.Qt.UserRole, version)
+                item.setToolTip(0, version["file"])
+                item.setToolTip(3, version["comment"])
+                self.version_list.addTopLevelItem(item)
+            for column in range(3):
+                self.version_list.resizeColumnToContents(column)
+            if self.version_list.topLevelItemCount():
+                self.version_list.setCurrentItem(self.version_list.topLevelItem(0))
+        self.open_button.setEnabled(bool(self.version_list.topLevelItemCount()))
+        self._refresh_thumbnail()
+
+    def _refresh_thumbnail(self):
+        item = self.version_list.currentItem()
+        thumb = item.data(0, QtCore.Qt.UserRole)["thumb"] if item else None
+        pixmap = QtGui.QPixmap(thumb) if thumb else QtGui.QPixmap()
+        if pixmap.isNull():
+            self.thumbnail.setPixmap(QtGui.QPixmap())
+            self.thumbnail.setText("Pas d'aperçu (il sera pris au prochain Save Up)" if item else "Aucune version")
+        else:
+            self.thumbnail.setPixmap(pixmap.scaled(320, 180, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
 
     def _browse_open(self):
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Dossier d'un projet MKE")
@@ -362,16 +466,31 @@ class ProjectSetupDialog(QtWidgets.QDialog):
             hou.ui.displayMessage("Ce dossier n'est pas un projet MKE (pas de PIPELINE/project.json).",
                                   severity=hou.severityType.Warning)
             return
-        self._open(info["root"])
+        mke_project.add_recent(info["root"])
+        self._fill_projects(select=info["root"])
+        self._refresh_browser()
 
-    def _open(self, root):
-        if hou.hipFile.hasUnsavedChanges():
-            if hou.ui.displayMessage("La scène ouverte a des changements non sauvegardés.",
-                                     buttons=("Ouvrir quand même", "Annuler"), default_choice=1, close_choice=1) == 1:
-                return
-        info, scene = mke_project.open_project(root)
+    def _confirm_discard(self):
+        return not hou.hipFile.hasUnsavedChanges() or hou.ui.displayMessage(
+            "La scène ouverte a des changements non sauvegardés.",
+            buttons=("Continuer", "Annuler"), default_choice=1, close_choice=1) == 0
+
+    def _open_version(self):
+        item = self.version_list.currentItem()
+        if not item or not self._confirm_discard():
+            return
+        version = item.data(0, QtCore.Qt.UserRole)
+        info = mke_project.open_scene(version["path"])
         self.accept()
-        hou.ui.setStatusMessage(f"Projet {info['name']} : {os.path.basename(scene) if scene else 'aucune scène, variables définies'}")
+        hou.ui.setStatusMessage(f"{info['name'] if info else ''} : {version['file']} ouvert")
+
+    def _new_scene(self):
+        info, entity = self.browser_project(), self.selected_entity()
+        if not info or not entity or not self._confirm_discard():
+            return
+        hip = mke_project.new_entity_scene(info, entity[0], **entity[1])
+        self.accept()
+        hou.ui.setStatusMessage(f"Nouvelle scène : {os.path.basename(hip)}")
 
     # ------------------------------------------------------------ shots and assets
     def _entities_tab(self):
@@ -380,8 +499,10 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         self.seq_input.setPlaceholderText("Séquence, ex : SEQ010")
         self.shot_input = QtWidgets.QLineEdit()
         self.shot_input.setPlaceholderText("Plan, ex : SH0010")
-        shot_button = QtWidgets.QPushButton("Ajouter le plan")
-        shot_button.clicked.connect(lambda: self._add_entity("shot", seq=self.seq_input.text(), shot=self.shot_input.text()))
+        self.shot_start = _spin(-100000, 100000, 1001)
+        self.shot_end = _spin(-100000, 100000, 1100)
+        shot_button = QtWidgets.QPushButton("Ajouter / mettre à jour le plan")
+        shot_button.clicked.connect(self._add_shot)
         self.shot_input.returnPressed.connect(shot_button.click)
         self.asset_input = QtWidgets.QLineEdit()
         self.asset_input.setPlaceholderText("Nom de l'asset, ex : Rocher")
@@ -392,19 +513,28 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         shot_row = QtWidgets.QHBoxLayout()
         shot_row.addWidget(self.seq_input)
         shot_row.addWidget(self.shot_input)
-        shot_row.addWidget(shot_button)
+        range_row = QtWidgets.QHBoxLayout()
+        range_row.addWidget(QtWidgets.QLabel("Frames"))
+        range_row.addWidget(self.shot_start)
+        range_row.addWidget(QtWidgets.QLabel("à"))
+        range_row.addWidget(self.shot_end)
+        range_row.addStretch()
+        range_row.addWidget(shot_button)
         asset_row = QtWidgets.QHBoxLayout()
         asset_row.addWidget(self.asset_input)
         asset_row.addWidget(asset_button)
         self.entity_tree = QtWidgets.QTreeWidget()
         self.entity_tree.setHeaderHidden(True)
+        self.entity_tree.currentItemChanged.connect(self._fill_shot_fields)
         self.no_project = _label("Crée ou ouvre un projet pour ajouter des plans et des assets.", "hint")
 
         self.entity_form = QtWidgets.QWidget()
         form = QtWidgets.QVBoxLayout(self.entity_form)
         form.setContentsMargins(0, 0, 0, 0)
-        form.addWidget(_section("Nouveau plan"))
+        form.addWidget(_section("Plan"))
         form.addLayout(shot_row)
+        form.addLayout(range_row)
+        form.addWidget(_label("Clique un plan existant ci-dessous pour modifier sa plage de frames.", "hint"))
         form.addWidget(_section("Nouvel asset"))
         form.addLayout(asset_row)
         form.addWidget(_section("Dans le projet"))
@@ -421,42 +551,63 @@ class ProjectSetupDialog(QtWidgets.QDialog):
         self.entity_tree.clear()
         if not info:
             return
+        self.shot_start.setValue(info["frame_start"])
+        self.shot_end.setValue(info["frame_end"])
         shots = QtWidgets.QTreeWidgetItem(self.entity_tree, [f"Plans ({len(info['shots'])})"])
         sequences = {}
         for entry in info["shots"]:
             seq, shot = entry.split("/")
             if seq not in sequences:
                 sequences[seq] = QtWidgets.QTreeWidgetItem(shots, [seq])
-            QtWidgets.QTreeWidgetItem(sequences[seq], [shot])
+            start, end = mke_project.shot_range(info, entry)
+            item = QtWidgets.QTreeWidgetItem(sequences[seq], [f"{shot}    {start}-{end}"])
+            item.setData(0, QtCore.Qt.UserRole, (seq, shot, start, end))
         assets = QtWidgets.QTreeWidgetItem(self.entity_tree, [f"Assets ({len(info['assets'])})"])
         for asset in info["assets"]:
             QtWidgets.QTreeWidgetItem(assets, [asset])
         self.entity_tree.expandAll()
 
-    def _add_entity(self, kind, **names):
+    def _fill_shot_fields(self, item, *_):
+        data = item.data(0, QtCore.Qt.UserRole) if item else None
+        if data:
+            seq, shot, start, end = data
+            self.seq_input.setText(seq)
+            self.shot_input.setText(shot)
+            self.shot_start.setValue(start)
+            self.shot_end.setValue(end)
+
+    def _add_shot(self):
+        if self.shot_end.value() < self.shot_start.value():
+            hou.ui.displayMessage("La fin doit être après le début.", severity=hou.severityType.Warning)
+            return
+        self._add_entity("shot", frame_range=(self.shot_start.value(), self.shot_end.value()),
+                         seq=self.seq_input.text(), shot=self.shot_input.text())
+
+    def _add_entity(self, kind, frame_range=None, **names):
         info = self.current_project()
         if not info:
             return
         try:
-            created = mke_project.add_entity(info, kind, **names)
+            created = mke_project.add_entity(info, kind, frame_range, **names)
         except ValueError:
             hou.ui.displayMessage("Remplis tous les champs.", severity=hou.severityType.Warning)
             return
         self._refresh_entities(info)
-        hou.ui.setStatusMessage(f"{'/'.join(names.values())} : {len(created)} dossiers créés")
+        self._refresh_browser()
+        hou.ui.setStatusMessage(f"{'/'.join(names.values())} : {len(created)} dossiers prêts")
 
 
 _dialog = None
 
 
 def projectSetup(tab=None):
-    """tab: 0 create, 1 open, 2 shots and assets. Default: Open if there are recent projects, else Create."""
+    """tab: 0 create, 1 scenes, 2 shots and assets. Default: Scenes if there is a project, else Create."""
     global _dialog
     if _dialog is not None:
         _dialog.close()
-    _dialog = ProjectSetupDialog(hou.qt.mainWindow())
+    _dialog = ProjectSetupDialog(hou.qt.mainWindow() if hou.isUIAvailable() else None)
     if tab is None:
-        tab = 1 if _dialog.recent_list.count() else 0
+        tab = 1 if _dialog.project_combo.count() else 0
     _dialog.tabs.setCurrentIndex(tab)
     _dialog.show()
     return _dialog
