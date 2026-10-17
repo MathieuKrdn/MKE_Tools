@@ -267,6 +267,43 @@ def scan_caches(info, progress=None):
     return caches
 
 
+OUTPUT_PARMS = ("cachedir", "sopoutput", "lopoutput", "file", "outputfile", "picture", "vm_picture", "saveDir", "filename")
+
+
+def _norm(path):
+    return os.path.normcase(os.path.normpath(path)).replace("\\", "/") if path else ""
+
+
+def writer_nodes(folders):
+    """{folder: [nodes]} for the nodes of the OPEN scene whose output path lives in each cache folder
+    (File Cache cachedir, ROP outputs...). Only the open scene can be searched."""
+    wanted = {f: _norm(f) + "/" for f in folders}
+    found = {f: [] for f in folders}
+    for node in hou.node("/").allSubChildren(recurse_in_locked_nodes=False):
+        paths = set()
+        for name in OUTPUT_PARMS:
+            parm = node.parm(name)
+            if parm is not None and parm.parmTemplate().type() == hou.parmTemplateType.String:
+                try:
+                    paths.add(_norm(parm.evalAsString()))
+                except hou.OperationFailed:
+                    pass
+        for folder, prefix in wanted.items():
+            if any(p.startswith(prefix) for p in paths) and node not in found[folder]:
+                found[folder].append(node)
+    return found
+
+
+def show_node(node):
+    """Select the node, make it current in the Network Editor and frame it."""
+    node.setSelected(True, clear_all_selected=True)
+    if hou.isUIAvailable():
+        editor = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+        if editor is not None:
+            editor.setCurrentNode(node)
+            editor.homeToSelection()
+
+
 def old_versions(caches, keep=2):
     """Paths of every version older than the `keep` newest of each cache."""
     return [v["path"] for versions in caches.values() for v in versions[keep:]]

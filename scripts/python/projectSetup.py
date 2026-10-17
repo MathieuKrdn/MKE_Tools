@@ -1038,15 +1038,17 @@ class DiskPanel(QtWidgets.QWidget):
         super().__init__(parent)
         self.info = None
         self.caches = {}
+        self.nodes = {}
         self.summary = _label("Clique « Analyser » pour mesurer les caches du projet.", "hint")
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Cache / version", "Taille", "Modifié"])
+        self.tree.setHeaderLabels(["Cache / version", "Taille", "Modifié", "Node (scène ouverte)"])
         self.tree.setAlternatingRowColors(True)
         self.tree.itemChanged.connect(lambda *_: self._refresh_selection())
-        self.tree.itemDoubleClicked.connect(lambda item, _: reveal(self._path(item)))
+        self.tree.itemDoubleClicked.connect(self._double_click)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
-        self.tree.setToolTip("Double-clic : ouvrir dans l'explorateur. Clic droit : plus d'options.")
+        self.tree.setToolTip("Double-clic : ouvrir dans l'explorateur, ou sur la colonne Node : aller au node.\n"
+                             "Clic droit : plus d'options.")
         analyse = QtWidgets.QPushButton("Analyser")
         analyse.clicked.connect(self.scan)
         self.keep = QtWidgets.QSpinBox()
@@ -1094,10 +1096,36 @@ class DiskPanel(QtWidgets.QWidget):
                 item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
                 item.setCheckState(0, QtCore.Qt.Unchecked)
                 item.setData(0, QtCore.Qt.UserRole, v)
+        self._fill_nodes()
         self.tree.blockSignals(False)
         self.tree.resizeColumnToContents(0)
         self.summary.setText(f"{mke_tracking.human(total)} de caches dans {len(self.caches)} dossiers de cache.")
         self._refresh_selection()
+
+    def _fill_nodes(self):
+        """Fourth column: the node(s) of the open scene writing into each cache."""
+        self.nodes = mke_tracking.writer_nodes([f"{self.info['root']}/{cache}" for cache in self.caches])
+        link = QtGui.QBrush(QtGui.QColor("#6fa8ff"))
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            nodes = self.nodes.get(item.data(0, QtCore.Qt.UserRole + 1), [])
+            if nodes:
+                item.setText(3, nodes[0].path() + (f"  (+{len(nodes) - 1})" if len(nodes) > 1 else ""))
+                item.setForeground(3, link)
+                item.setToolTip(3, "\n".join(n.path() for n in nodes) + "\nDouble-clic pour aller au node")
+
+    def _nodes_for(self, item):
+        while item is not None and item.parent() is not None:
+            item = item.parent()
+        return self.nodes.get(item.data(0, QtCore.Qt.UserRole + 1), []) if item else []
+
+    def _double_click(self, item, column):
+        nodes = self._nodes_for(item)
+        if column == 3 and nodes:
+            mke_tracking.show_node(nodes[0])
+            self.window().showMinimized()
+        else:
+            reveal(self._path(item))
 
     def _path(self, item):
         data = item.data(0, QtCore.Qt.UserRole) if item else None
@@ -1111,9 +1139,21 @@ class DiskPanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         explore = menu.addAction("Ouvrir dans l'explorateur")
         copy = menu.addAction("Copier le chemin")
+        node_actions = {}
+        nodes = self._nodes_for(item)
+        if nodes:
+            menu.addSeparator()
+            for node in nodes:
+                node_actions[menu.addAction(f"Aller au node  {node.path()}")] = node
+        else:
+            menu.addAction("Aucun node de la scène ouverte n'écrit ici").setEnabled(False)
+        menu.addSeparator()
         trash = menu.addAction("Mettre à la corbeille...") if item.data(0, QtCore.Qt.UserRole) else None
         choice = menu.exec_(self.tree.viewport().mapToGlobal(position))
-        if choice == explore:
+        if choice in node_actions:
+            mke_tracking.show_node(node_actions[choice])
+            self.window().showMinimized()  # get the dashboard out of the way of the network
+        elif choice == explore:
             reveal(path)
         elif choice == copy:
             QtWidgets.QApplication.clipboard().setText(os.path.normpath(path))
