@@ -179,21 +179,40 @@ def current_project():
 
 # ==================================================================== dashboard
 
+PANEL_NAME = "mke_projects"
+
+
+def _step_aside(widget):
+    """After jumping to a node: minimise the floating dashboard (a docked one stays where it is)."""
+    while widget is not None and not isinstance(widget, ProjectsDashboard):
+        widget = widget.parent()
+    if widget is not None and not widget.docked:
+        widget.showMinimized()
+
+
 class ProjectsDashboard(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, docked=False):
         super().__init__(parent)
+        self.docked = docked
+        if docked:
+            self.setWindowFlags(QtCore.Qt.Widget)  # lives inside a Houdini pane tab
         self.setWindowTitle("Projects")
         self.setStyleSheet(STYLE)
         self.resize(1100, 640)
 
         title = _label("Projects", "title")
         self.active = _label("", "hint")
+        self.dock_button = QtWidgets.QPushButton("Ancrer dans Houdini")
+        self.dock_button.setToolTip("Ouvre le dashboard comme un onglet de Houdini (à côté du Network Editor)")
+        self.dock_button.clicked.connect(lambda: (mke_project.set_pref("dashboard_docked", True), self.dock()))
+        self.dock_button.setVisible(not docked)
         new_project = QtWidgets.QPushButton("+ Nouveau projet")
         new_project.clicked.connect(self._new_project)
         header = QtWidgets.QHBoxLayout()
         header.addWidget(title)
         header.addSpacing(12)
         header.addWidget(self.active, 1)
+        header.addWidget(self.dock_button)
         header.addWidget(new_project)
 
         # 1. projects
@@ -494,7 +513,14 @@ class ProjectsDashboard(QtWidgets.QDialog):
     def done(self, result):
         if self.video_player:
             self.video_player.stop()  # release the file and the decoder when the dashboard closes
+        if self.docked:
+            self.refresh()  # a pane never closes: show the new state instead
+            return
         super().done(result)
+
+    def dock(self):
+        dock_panel()
+        self.close()
 
     def closeEvent(self, event):
         if self.video_player:
@@ -1127,7 +1153,7 @@ class DiskPanel(QtWidgets.QWidget):
         nodes = self._nodes_for(item)
         if column == 3 and nodes:
             mke_tracking.show_node(nodes[0])
-            self.window().showMinimized()
+            _step_aside(self)
         else:
             reveal(self._path(item))
 
@@ -1156,7 +1182,7 @@ class DiskPanel(QtWidgets.QWidget):
         choice = menu.exec_(self.tree.viewport().mapToGlobal(position))
         if choice in node_actions:
             mke_tracking.show_node(node_actions[choice])
-            self.window().showMinimized()  # get the dashboard out of the way of the network
+            _step_aside(self)  # get the dashboard out of the way of the network
         elif choice == explore:
             reveal(path)
         elif choice == copy:
@@ -1386,7 +1412,7 @@ class QueuePanel(QtWidgets.QWidget):
         node = hou.node(job["node"])
         if node is not None:
             mke_tracking.show_node(node)
-            self.window().showMinimized()
+            _step_aside(self)
 
 
 # ==================================================================== new project
@@ -1710,7 +1736,11 @@ _dashboard = None
 
 
 def projects():
+    """Menu / shelf: bring the docked dashboard forward if there is one, else open the floating window."""
     global _dashboard
+    if hou.isUIAvailable() and docked_panel() is not None:
+        docked_panel().setIsCurrentTab()
+        return None
     if _dashboard is not None:
         _dashboard.close()
     _dashboard = ProjectsDashboard(hou.qt.mainWindow() if hou.isUIAvailable() else None)
@@ -1718,9 +1748,37 @@ def projects():
     return _dashboard
 
 
+def docked_panel():
+    """The pane tab already showing the dashboard, if any."""
+    for tab in hou.ui.curDesktop().paneTabs():
+        if tab.type() == hou.paneTabType.PythonPanel:
+            interface = tab.activeInterface()
+            if interface is not None and interface.name() == PANEL_NAME:
+                return tab
+    return None
+
+
+def dock_panel():
+    """Show the dashboard as a pane tab, next to the Network Editor."""
+    tab = docked_panel()
+    if tab is None:
+        target = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor) or hou.ui.curDesktop().paneTabs()[0]
+        tab = target.pane().createTab(hou.paneTabType.PythonPanel)
+        tab.setActiveInterface(hou.pypanel.interfaceByName(PANEL_NAME))
+    tab.setIsCurrentTab()
+    return tab
+
+
 def open_at_startup():
-    """Called once Houdini's UI is up: show the dashboard unless a scene was opened from the command line."""
-    if mke_project.get_pref("open_at_startup", True) and hou.hipFile.isNewFile():
+    """Called once Houdini's UI is up: show the dashboard unless a scene was opened from the command line,
+    or it is already docked in the desktop Houdini restored."""
+    if not mke_project.get_pref("open_at_startup", True) or not hou.hipFile.isNewFile():
+        return
+    if docked_panel() is not None:
+        docked_panel().setIsCurrentTab()
+    elif mke_project.get_pref("dashboard_docked", False):
+        dock_panel()
+    else:
         projects()
 
 

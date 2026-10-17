@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pythonPanelDocument>
+  <!-- MKE_Tools: the Projects dashboard as a dockable pane (New Pane Tab Type > Misc > MKE Projects). -->
+  <interface name="mke_projects" label="MKE Projects" icon="MISC_python" showNetworkNavigationBar="false" help_url="">
+    <script><![CDATA[
+import projectSetup
+
+
+def onCreateInterface():
+    return projectSetup.ProjectsDashboard(docked=True)
+]]></script>
+    <includeInPaneTabMenu menu_position="0" create_separator="false"/>
+    <includeInToolbarMenu menu_position="300" create_separator="false"/>
+  </interface>
+</pythonPanelDocument>
