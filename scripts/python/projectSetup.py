@@ -291,6 +291,8 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.content_tabs.addTab(self.notes_panel, "Notes")
         self.content_tabs.addTab(self.time_panel, "Temps")
         self.content_tabs.addTab(self.disk_panel, "Disque")
+        self.queue_panel = QueuePanel()
+        self.content_tabs.addTab(self.queue_panel, "File")
         self.content_tabs.currentChanged.connect(lambda *_: (self._refresh_media(), self._refresh_panels()))
 
         splitter = QtWidgets.QSplitter()
@@ -437,6 +439,8 @@ class ProjectsDashboard(QtWidgets.QDialog):
             self.time_panel.refresh(info)
         elif tab is self.disk_panel:
             self.disk_panel.refresh(info)
+        elif tab is self.queue_panel:
+            self.queue_panel.refresh(info)
 
     def _on_notes_changed(self):
         """Repaint the status column of the selected shot without rebuilding the whole tree."""
@@ -1206,6 +1210,183 @@ class DiskPanel(QtWidgets.QWidget):
         except Exception as error:
             hou.ui.displayMessage(str(error), severity=hou.severityType.Warning)
         self.scan()
+
+
+class QueuePanel(QtWidgets.QWidget):
+    """Deadline jobs sent from this project: tonight's queue, running, finished, errors."""
+
+    GROUPS = ("En cours", "Ce soir", "En attente", "Terminés")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        import mke_deadline
+        self.dl = mke_deadline
+        self.info = None
+        self.counters = {}
+        cards = QtWidgets.QHBoxLayout()
+        for title, color in (("En cours", "#4f86c6"), ("Ce soir", "#b08cd8"), ("Terminés", "#4caf61"), ("Erreurs", "#d0603f")):
+            value = _label("0", "title")
+            value.setWordWrap(False)
+            value.setStyleSheet(f"color: {color}; font-size: 18pt; font-weight: bold;")
+            self.counters[title] = value
+            cards.addWidget(_card(title, [("", value)]))
+
+        self.night = QtWidgets.QTimeEdit(QtCore.QTime.fromString(mke_project.get_pref("night_start", mke_deadline.NIGHT_DEFAULT), "HH:mm"))
+        self.night.setDisplayFormat("HH:mm")
+        self.night.setFixedWidth(80)
+        self.night.timeChanged.connect(lambda t: mke_project.set_pref("night_start", t.toString("HH:mm")))
+        self.worker = _label("", "hint")
+        refresh = QtWidgets.QPushButton("Actualiser")
+        refresh.clicked.connect(self.refresh_jobs)
+
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setHeaderLabels(["Job", "État", "Progression", "Frames", "Temps"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.currentItemChanged.connect(lambda *_: self._refresh_detail())
+        self.tree.itemDoubleClicked.connect(lambda *_: self._go_to_node())
+        self.detail = _label("", "hint")
+        self.empty = _label("Aucun job. Clic droit sur un File Cache > « Deadline : calculer ce soir ».", "hint")
+
+        self.buttons = {}
+        for key, text in (("node", "Aller au node"), ("log", "Ouvrir le log"), ("folder", "Dossier de sortie"),
+                          ("pause", "Suspendre"), ("requeue", "Relancer"), ("forget", "Retirer")):
+            self.buttons[key] = QtWidgets.QPushButton(text)
+        self.buttons["requeue"].setObjectName("primary")
+        self.buttons["node"].clicked.connect(self._go_to_node)
+        self.buttons["log"].clicked.connect(lambda: self._job() and os.path.isfile(self._job()["log"]) and os.startfile(self._job()["log"]))
+        self.buttons["folder"].clicked.connect(lambda: self._job() and reveal(self._job().get("output")))
+        self.buttons["pause"].clicked.connect(self._pause)
+        self.buttons["requeue"].clicked.connect(lambda: self._act("requeue"))
+        self.buttons["forget"].clicked.connect(self._forget)
+        self.buttons["forget"].setToolTip("Retire le job de cette liste (il reste dans Deadline)")
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(cards)
+        layout.addLayout(_row("Lancer la file de nuit à", self.night, None, self.worker, refresh))
+        layout.addWidget(self.tree, 1)
+        layout.addWidget(self.empty)
+        layout.addWidget(self.detail)
+        b = self.buttons
+        layout.addLayout(_row(b["node"], b["log"], b["folder"], None, b["forget"], b["pause"], b["requeue"]))
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(lambda: self.isVisible() and self.refresh_jobs())
+        self.timer.start(30 * 1000)
+        self._refresh_detail()
+
+    def refresh(self, info):
+        self.info = info
+        self.refresh_jobs()
+
+    def refresh_jobs(self):
+        selected = self._job()["id"] if self._job() else None
+        self.tree.clear()
+        counts = dict.fromkeys(("En cours", "Ce soir", "Terminés", "Erreurs"), 0)
+        jobs = self.dl.job_states(self.info) if self.info else []
+        groups, selected_item, bars = {}, None, []
+        for job in sorted(jobs, key=lambda j: j["submitted"], reverse=True):
+            group, label, color, percent, timing = self.dl.describe(job)
+            if group == "Terminés" and job.get("Status") == "Completed" and \
+                    datetime.datetime.fromisoformat(job["submitted"]) < datetime.datetime.now() - datetime.timedelta(days=7):
+                continue  # keep a week of history
+            counts["Erreurs" if label == "Erreur" else group if group in counts else "Ce soir"] += 1
+            if group not in groups:
+                groups[group] = QtWidgets.QTreeWidgetItem([group])
+                font = groups[group].font(0); font.setBold(True); groups[group].setFont(0, font)
+            item = QtWidgets.QTreeWidgetItem(groups[group], [job["name"], f"● {label}", "",
+                                                             f"{job['frames'][0]}-{job['frames'][1]}", timing])
+            item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
+            item.setToolTip(0, f"{job['node']}\n{job['hip']}\nDeadline : {job['id']}")
+            item.setToolTip(4, timing)
+            item.setData(0, QtCore.Qt.UserRole, job)
+            bar = QtWidgets.QProgressBar()
+            bar.setValue(percent)
+            bar.setFixedHeight(14)
+            bar.setStyleSheet("QProgressBar { border: 1px solid #555; border-radius: 3px; text-align: center; font-size: 8pt; }"
+                              f"QProgressBar::chunk {{ background: {color}; }}")
+            bars.append((item, bar))  # attached once the item is in the tree (setItemWidget needs that)
+            if job["id"] == selected:
+                selected_item = item
+        for name in self.GROUPS:
+            if name in groups:
+                self.tree.addTopLevelItem(groups[name])
+        for item, bar in bars:
+            self.tree.setItemWidget(item, 2, bar)
+        self.tree.expandAll()
+        for column, width in enumerate((240, 150, 120, 80)):
+            self.tree.setColumnWidth(column, width)
+        for name, value in counts.items():
+            self.counters[name].setText(str(value))
+        self.empty.setVisible(not jobs)
+        self._refresh_worker()
+        if selected_item is not None:
+            self.tree.setCurrentItem(selected_item)
+        self._refresh_detail()
+
+    def _refresh_worker(self):
+        try:
+            workers = [w.strip() for w in self.dl.run("-GetSlaveNames", timeout=15).splitlines() if w.strip()]
+            states = [(w, self.dl._parse(self.dl.run("-GetSlave", w, timeout=15)).get("SlaveState", "?")) for w in workers]
+        except Exception as error:
+            self.worker.setText(f"Deadline injoignable : {error}")
+            return
+        fr = {"Offline": "hors ligne", "Idle": "libre", "Rendering": "en calcul", "Stalled": "bloqué"}
+        text = "  ·  ".join(f"{w} : {fr.get(s, s)}" for w, s in states)
+        if all(s == "Offline" for _, s in states):
+            text += "  (lance Deadline Worker pour que la file tourne)"
+            self.worker.setStyleSheet("color: #e0a030;")
+        else:
+            self.worker.setStyleSheet("")
+        self.worker.setText(text)
+
+    def _job(self):
+        item = self.tree.currentItem()
+        return item.data(0, QtCore.Qt.UserRole) if item else None
+
+    def _refresh_detail(self):
+        job = self._job()
+        for button in self.buttons.values():
+            button.setEnabled(bool(job))
+        if not job:
+            self.detail.setText("")
+            return
+        status = job.get("Status")
+        self.buttons["pause"].setText("Reprendre" if status == "Suspended" else "Suspendre")
+        deps = f"  ·  attend {len(job['deps'])} job(s)" if job.get("deps") else ""
+        when = f"  ·  programmé {job['scheduled'][11:16]}" if job.get("scheduled") else ""
+        self.detail.setText(f"{job['node']}  ·  {os.path.basename(job['hip'])}{when}{deps}")
+
+    def _act(self, verb):
+        job = self._job()
+        if job:
+            self.dl.action(verb, job["id"])
+            self.refresh_jobs()
+
+    def _pause(self):
+        job = self._job()
+        if job:
+            self._act("resume" if job.get("Status") == "Suspended" else "suspend")
+
+    def _forget(self):
+        job = self._job()
+        if job and self.info:
+            self.dl.forget(self.info, job["id"])
+            self.refresh_jobs()
+
+    def _go_to_node(self):
+        job = self._job()
+        if not job:
+            return
+        if os.path.normcase(os.path.normpath(job["hip"])) != os.path.normcase(os.path.normpath(hou.hipFile.path())):
+            if hou.ui.displayMessage(f"Ce job vient d'une autre scène :\n{os.path.basename(job['hip'])}\n\nL'ouvrir ?",
+                                     buttons=("Ouvrir la scène", "Annuler"), close_choice=1) != 0 or not _confirm_discard():
+                return
+            mke_project.open_scene(job["hip"])
+        node = hou.node(job["node"])
+        if node is not None:
+            mke_tracking.show_node(node)
+            self.window().showMinimized()
 
 
 # ==================================================================== new project

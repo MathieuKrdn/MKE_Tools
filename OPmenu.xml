@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MKE_Tools: right-click on a File Cache or a ROP -> send it to Deadline (mke_deadline). -->
+<menuDocument>
+  <menu>
+    <separatorItem/>
+    <scriptItem id="mke_deadline_tonight">
+      <label>Deadline : calculer ce soir</label>
+      <context>
+        <expression>import mke_deadline; return mke_deadline.can_submit(kwargs["node"])</expression>
+      </context>
+      <scriptCode><![CDATA[import mke_deadline
+mke_deadline.submit_from_menu(kwargs["node"], tonight=True)]]></scriptCode>
+    </scriptItem>
+    <scriptItem id="mke_deadline_now">
+      <label>Deadline : calculer maintenant</label>
+      <context>
+        <expression>import mke_deadline; return mke_deadline.can_submit(kwargs["node"])</expression>
+      </context>
+      <scriptCode><![CDATA[import mke_deadline
+mke_deadline.submit_from_menu(kwargs["node"], tonight=False)]]></scriptCode>
+    </scriptItem>
+  </menu>
+</menuDocument>
