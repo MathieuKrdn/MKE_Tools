@@ -4,10 +4,87 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-# Import the backend worker logic from the other file
-from worker import RatConversionWorker
 
-from PySide2 import QtCore, QtWidgets, QtCore, QtGui
+from hutil.Qt import QtCore, QtWidgets, QtGui
+# STYLESHEET gemini
+UI_STYLESHEET = """
+QWidget {
+    background-color: #2E2E2E;
+    color: #E0E0E0;
+    font-family: "Segoe UI", "Cantarell", "Arial", sans-serif;
+    font-size: 10pt;
+}
+QMainWindow, QDialog {
+    background-color: #252525;
+}
+QLineEdit {
+    background-color: #3C3C3C;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 6px;
+    color: #F0F0F0;
+}
+QLineEdit:focus {
+    border: 1px solid #77A6F7;
+}
+QPushButton {
+    background-color: #4A4A4A;
+    border: 1px solid #666;
+    border-radius: 4px;
+    padding: 6px 12px;
+}
+QPushButton:hover {
+    background-color: #5A5A5A;
+}
+QPushButton:pressed {
+    background-color: #3A3A3A;
+}
+QPushButton#generate_button {
+    background-color: #4078D8;
+    color: white;
+    font-weight: bold;
+    padding: 8px 15px;
+}
+QPushButton#generate_button:hover {
+    background-color: #5C94F7;
+}
+QPushButton#generate_button:disabled {
+    background-color: #3A4E69;
+    color: #888;
+}
+QProgressBar {
+    border: 1px solid #555;
+    border-radius: 4px;
+    text-align: center;
+    color: white;
+    background-color: #3C3C3C;
+}
+QProgressBar::chunk {
+    background-color: #4078D8;
+    border-radius: 3px;
+    margin: 1px;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
+QCheckBox::indicator:unchecked {
+    image: url(:/qt-project.org/styles/commonstyle/images/checkbox-unchecked-d.png);
+}
+QCheckBox::indicator:checked {
+    image: url(:/qt-project.org/styles/commonstyle/images/checkbox-checked-d.png);
+}
+QSpinBox {
+    background-color: #3C3C3C;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 5px;
+}
+QLabel#status_label {
+    color: #AAAAAA;
+    font-size: 9pt;
+}
+"""
 # UI WINDOW
 class RatGeneratorUI(QtWidgets.QDialog):
     def __init__(self, parent=None):

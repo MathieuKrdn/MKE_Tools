@@ -1,6 +1,6 @@
 import os
 import hou
-from PySide2.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QCheckBox, QPushButton, QLabel, QApplication, QLineEdit, QHBoxLayout, QComboBox
+from hutil.Qt.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QCheckBox, QPushButton, QLabel, QApplication, QLineEdit, QHBoxLayout, QComboBox
 
 class FolderSelectionDialog(QDialog):
     def __init__(self, folders, parent=None):

@@ -1,6 +1,6 @@
 from ast import arguments
 import hou
-from PySide2 import QtWidgets, QtCore, QtGui
+from hutil.Qt import QtWidgets, QtCore, QtGui
 import subprocess
 import tempfile
 import os
