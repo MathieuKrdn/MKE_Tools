@@ -52,11 +52,12 @@ def preset_folders(presets, type_, cache):
 # ---------------------------------------------------------------- versioning
 
 def version_up_path(path):
-    """scene_v0001.hip -> scene_v0002.hip. Always 4 digits (old _v002 becomes _v0003)."""
+    """scene_v0001.hip -> scene_v0002.hip. Keeps the existing padding (_v025 -> _v026), new files get 4 digits."""
     base, ext = os.path.splitext(path)
     match = VERSION_RE.search(base)
     if match:
-        return VERSION_RE.sub(f"_v{int(match.group(1)) + 1:04d}", base) + ext
+        digits = match.group(1)
+        return VERSION_RE.sub(f"_v{int(digits) + 1:0{len(digits)}d}", base) + ext
     return f"{base}_v0001{ext}"
 
 
@@ -93,6 +94,11 @@ def write_project(info):
     data = {k: v for k, v in info.items() if k != "root"}
     with open(os.path.join(info["root"], PROJECT_FILE), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def scenes_dir(info):
+    """Folder holding the project's scenes: 3D/SCENES for MKE projects, whatever was adopted otherwise (ex: WORK)."""
+    return info.get("scenes", SCENES_DIR)
 
 
 def cache_dir(info):
@@ -179,7 +185,7 @@ def set_pref(key, value):
 
 def latest_scene(info):
     scenes = []
-    for folder, _, files in os.walk(os.path.join(info["root"], SCENES_DIR)):
+    for folder, _, files in os.walk(os.path.join(info["root"], scenes_dir(info))):
         scenes += [os.path.join(folder, f) for f in files if f.endswith((".hip", ".hiplc", ".hipnc"))]
     return _slash(max(scenes, key=os.path.getmtime)) if scenes else None
 
@@ -234,6 +240,42 @@ def create_project(parent, name, type_, folders, settings, cache, keep_scene=Fal
     record_version(hip, "Création du projet")
     add_recent(root)
     return info, hip
+
+
+def detect_scenes_dir(root):
+    """Sub-folder of root holding the most scenes (backup/ and autosave/ ignored), relative, '' for root itself."""
+    counts = {}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ("backup", AUTOSAVE_DIR, THUMBS_DIR)]
+        hips = sum(f.endswith(HIP_EXT) for f in files)
+        if hips:
+            counts[folder] = hips
+    if not counts:
+        return SCENES_DIR
+    best = max(counts, key=counts.get)
+    return _slash(os.path.relpath(best, root)) if best != root else ""
+
+
+def adopt_project(root, type_, settings, scenes=None, cache=None, name=None):
+    """Turn an existing folder into a pipeline project WITHOUT moving anything: only PIPELINE/project.json is written.
+    scenes / cache are relative to root (detected / scenes + '/geo' by default)."""
+    root = _slash(os.path.abspath(root))
+    if os.path.isfile(os.path.join(root, PROJECT_FILE)):
+        raise FileExistsError(root)
+    scenes = detect_scenes_dir(root) if scenes is None else scenes
+    cache = cache or _slash(os.path.join(scenes, "geo")).lstrip("/")
+    os.makedirs(os.path.join(root, "PIPELINE"), exist_ok=True)
+    info = {
+        "root": root, "name": name or sanitize_name(os.path.basename(root)), "type": type_,
+        "scenes": scenes, "cache": cache,
+        "created": datetime.date.today().isoformat(), "author": user_trigram(), "adopted": True,
+        "fps": settings["fps"], "frame_start": settings["frame_start"], "frame_end": settings["frame_end"],
+        "resolution": list(settings["resolution"]), "ocio": settings.get("ocio", ""),
+        "shots": [], "assets": [],
+    }
+    write_project(info)
+    add_recent(root)
+    return info
 
 
 def _write_readme(info):
@@ -340,7 +382,7 @@ def apply_range(start, end):
 
 def shot_for_path(info, hip):
     """'seq/shot' if the .hip lives in 3D/SCENES/seq/shot, else None."""
-    rel = _slash(os.path.relpath(os.path.dirname(hip), os.path.join(info["root"], SCENES_DIR)))
+    rel = _slash(os.path.relpath(os.path.dirname(hip), os.path.join(info["root"], scenes_dir(info))))
     return rel if rel in info["shots"] else None
 
 
@@ -354,7 +396,7 @@ HIP_EXT = (".hip", ".hiplc", ".hipnc")
 def entity_dir(info, kind="project", **names):
     """Scene folder of the project root, a shot (seq=, shot=) or an asset (asset=)."""
     sub = {"project": "", "shot": "{seq}/{shot}", "asset": "ASSETS/{asset}"}[kind].format(**names)
-    return _slash(os.path.join(info["root"], SCENES_DIR, sub)).rstrip("/")
+    return _slash(os.path.join(info["root"], scenes_dir(info), sub)).rstrip("/")
 
 
 def _read_versions(folder):

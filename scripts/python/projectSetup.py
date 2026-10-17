@@ -289,9 +289,14 @@ class ProjectsDashboard(QtWidgets.QDialog):
             return
         info = mke_project.find_project(path)
         if not info:
-            hou.ui.displayMessage("Ce dossier n'est pas un projet MKE (pas de PIPELINE/project.json).",
-                                  severity=hou.severityType.Warning)
-            return
+            scenes = mke_project.detect_scenes_dir(path) or "(racine)"
+            if hou.ui.displayMessage(
+                    f"Ce dossier n'est pas encore dans le pipeline.\n\nL'ajouter ? Rien n'est déplacé : seul "
+                    f"PIPELINE/project.json est créé.\nScènes détectées dans : {scenes}",
+                    buttons=("Ajouter", "Annuler"), close_choice=1) == 1:
+                return
+            presets = mke_project.load_presets()
+            info = mke_project.adopt_project(path, "FX", mke_project.preset_settings(presets, "FX"))
         mke_project.add_recent(info["root"])
         self.refresh(select=info["root"])
 
