@@ -5,6 +5,7 @@ CreateProjectDialog -> "+ Nouveau projet"
 EntitiesDialog      -> "+ Plan / asset"
 """
 import os
+import subprocess
 
 import hou
 from hutil.Qt import QtCore, QtGui, QtWidgets
@@ -65,7 +66,8 @@ def _column(title, widget, *buttons):
     column = QtWidgets.QWidget()
     layout = QtWidgets.QVBoxLayout(column)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(_section(title))
+    if title:
+        layout.addWidget(_section(title))
     layout.addWidget(widget, 1)
     if buttons:
         row = QtWidgets.QHBoxLayout()
@@ -158,11 +160,44 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.open_button.setObjectName("primary")
         self.open_button.setDefault(True)
         self.open_button.clicked.connect(self._open_version)
+        versions_page = _column("", versions_box, self.new_scene_button, None, self.open_button)
+
+        # 4. media: blasts, renders, image sequences of the selected shot / asset
+        self.media_list = QtWidgets.QTreeWidget()
+        self.media_list.setHeaderLabels(["Nom", "Date", "Type", "Infos"])
+        self.media_list.setRootIsDecorated(False)
+        self.media_list.setAlternatingRowColors(True)
+        self.media_list.setTextElideMode(QtCore.Qt.ElideMiddle)
+        self.media_list.currentItemChanged.connect(lambda *_: self._refresh_media_preview())
+        self.media_list.itemDoubleClicked.connect(lambda *_: self._play_media())
+        self.media_preview = QtWidgets.QLabel()
+        self.media_preview.setAlignment(QtCore.Qt.AlignCenter)
+        self.media_preview.setFixedHeight(200)
+        self.media_preview.setStyleSheet(self.thumbnail.styleSheet())
+        media_box = QtWidgets.QWidget()
+        box = QtWidgets.QVBoxLayout(media_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addWidget(self.media_list, 1)
+        box.addWidget(self.media_preview)
+        folder_button = QtWidgets.QPushButton("Ouvrir le dossier")
+        folder_button.clicked.connect(self._open_media_folder)
+        daily_button = QtWidgets.QPushButton("+ Daily flipbook")
+        daily_button.setToolTip("Flipbook du viewport en mp4, nommé selon la convention du projet")
+        daily_button.clicked.connect(self._daily)
+        self.play_button = QtWidgets.QPushButton("Lire")
+        self.play_button.setObjectName("primary")
+        self.play_button.clicked.connect(self._play_media)
+        media_page = _column("", media_box, folder_button, daily_button, None, self.play_button)
+
+        self.content_tabs = QtWidgets.QTabWidget()
+        self.content_tabs.addTab(versions_page, "Versions")
+        self.content_tabs.addTab(media_page, "Médias")
+        self.content_tabs.currentChanged.connect(lambda *_: self._refresh_media())
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(_column("Projets", projects_box, browse, self.settings_button))
         splitter.addWidget(_column("Plans et assets", self.entity_tree, self.entity_button))
-        splitter.addWidget(_column("Versions", versions_box, self.new_scene_button, None, self.open_button))
+        splitter.addWidget(self.content_tabs)
         splitter.setSizes([260, 240, 600])
 
         self.startup_check = QtWidgets.QCheckBox("Ouvrir au démarrage de Houdini")
@@ -281,6 +316,64 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.new_scene_button.setEnabled(bool(info and entity))
         self.open_button.setEnabled(bool(self.version_list.topLevelItemCount()))
         self._refresh_thumbnail()
+        self._refresh_media()
+
+    def _refresh_media(self):
+        """Scan media only while the Médias tab is shown: OUT folders can be large."""
+        if self.content_tabs.currentIndex() != 1:
+            return
+        self.media_list.clear()
+        info, entity = self.selected_project(), self.selected_entity()
+        if info and entity:
+            for media in mke_project.list_media(info, entity[0], **entity[1]):
+                item = QtWidgets.QTreeWidgetItem([media["name"], media["date"], media["kind"], media["info"]])
+                item.setData(0, QtCore.Qt.UserRole, media)
+                item.setToolTip(0, media["path"])
+                self.media_list.addTopLevelItem(item)
+            for column in (1, 2, 3):
+                self.media_list.resizeColumnToContents(column)
+            self.media_list.setColumnWidth(0, max(260, self.media_list.width() - sum(
+                self.media_list.columnWidth(c) for c in (1, 2, 3)) - 30))
+            if self.media_list.topLevelItemCount():
+                self.media_list.setCurrentItem(self.media_list.topLevelItem(0))
+        self.play_button.setEnabled(bool(self.media_list.topLevelItemCount()))
+        self._refresh_media_preview()
+
+    def selected_media(self):
+        item = self.media_list.currentItem()
+        return item.data(0, QtCore.Qt.UserRole) if item else None
+
+    def _refresh_media_preview(self):
+        media = self.selected_media()
+        first = media["first"] if media else ""
+        pixmap = QtGui.QPixmap(first) if first.lower().endswith((".png", ".jpg", ".jpeg")) else QtGui.QPixmap()
+        if pixmap.isNull():
+            self.media_preview.setPixmap(QtGui.QPixmap())
+            self.media_preview.setText("Double-clic pour lire" if media else
+                                       "Aucun média : « + Daily flipbook » en crée un depuis le viewport")
+        else:
+            self.media_preview.setPixmap(pixmap.scaled(356, 200, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+
+    def _play_media(self):
+        media = self.selected_media()
+        if not media:
+            return
+        if media["kind"] == "Séquence":
+            mplay = os.path.join(hou.getenv("HFS"), "bin", "mplay")
+            subprocess.Popen([mplay, media["mplay"]])
+        else:
+            os.startfile(media["path"])
+
+    def _open_media_folder(self):
+        media, info = self.selected_media(), self.selected_project()
+        folder = media["folder"] if media else (mke_project.media_roots(info) or [info["root"]])[0] if info else None
+        if folder:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder))
+
+    def _daily(self):
+        import mke_daily
+        if mke_daily.dailyFlipbook():
+            self.accept()
 
     def _refresh_thumbnail(self):
         item = self.version_list.currentItem()

@@ -527,6 +527,81 @@ def open_scene(hip):
     return info
 
 
+# ---------------------------------------------------------------- dailies and media
+
+VIDEO_EXT = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff")
+SEQUENCE_RE = re.compile(r"^(.*?[._])(\d{3,})(\.[A-Za-z]+)$")  # name.0001.exr / name_0001.png, not name_v003.png
+MEDIA_MAX_DEPTH = 4
+
+
+def dailies_dir(info, shot=None):
+    """Where flipbooks go: project.json 'dailies', else OUT/blast if it exists, else _DAILIES. Per shot when that folder exists."""
+    base = info.get("dailies") or ("OUT/blast" if os.path.isdir(os.path.join(info["root"], "OUT", "blast")) else "_DAILIES")
+    folder = os.path.join(info["root"], base)
+    if shot and os.path.isdir(os.path.join(folder, shot)):
+        folder = os.path.join(folder, shot)
+    return _slash(folder)
+
+
+def media_roots(info):
+    folders = info.get("media") or ["_DAILIES", "OUT"]
+    return [_slash(os.path.join(info["root"], f)) for f in folders if os.path.isdir(os.path.join(info["root"], f))]
+
+
+def _matches_entity(path, kind, names):
+    if kind == "project":
+        return True
+    low = path.lower()
+    if kind == "shot":
+        seq, shot = names["seq"].lower(), names["shot"].lower()
+        return f"/{seq}/{shot}/" in low or f"{seq}_{shot}" in low
+    return names["asset"].lower() in low
+
+
+def list_media(info, kind="project", **names):
+    """Videos, images and image sequences (grouped) under the project's media folders, newest first."""
+    entries, sequences = [], {}
+    for root in media_roots(info):
+        base_depth = root.count("/")
+        for folder, dirs, files in os.walk(root):
+            folder = _slash(folder)
+            if folder.count("/") - base_depth >= MEDIA_MAX_DEPTH:
+                dirs[:] = []
+            for name in files:
+                path = f"{folder}/{name}"
+                lower = name.lower()
+                if not lower.endswith(VIDEO_EXT + IMAGE_EXT) or not _matches_entity(path, kind, names):
+                    continue
+                match = SEQUENCE_RE.match(name)
+                if lower.endswith(IMAGE_EXT) and match:
+                    key = (folder, match.group(1), len(match.group(2)), match.group(3))
+                    sequences.setdefault(key, []).append((int(match.group(2)), path))
+                    continue
+                entries.append(_media_entry(path, "Vidéo" if lower.endswith(VIDEO_EXT) else "Image", [path]))
+    for (folder, prefix, padding, ext), frames in sequences.items():
+        frames.sort()
+        if len(frames) == 1:
+            entries.append(_media_entry(frames[0][1], "Image", [frames[0][1]]))
+            continue
+        entry = _media_entry(f"{folder}/{prefix}{'#' * padding}{ext}", "Séquence", [p for _, p in frames])
+        entry.update({"info": f"{frames[0][0]}-{frames[-1][0]}  ({len(frames)} images)",
+                      "mplay": f"{folder}/{prefix}$F{padding}{ext}"})
+        entries.append(entry)
+    return sorted(entries, key=lambda e: e["mtime"], reverse=True)
+
+
+def _media_entry(path, kind, files):
+    newest = max(files, key=os.path.getmtime)
+    size = sum(os.path.getsize(f) for f in files)
+    return {
+        "path": path, "name": os.path.basename(path), "folder": os.path.dirname(path), "kind": kind,
+        "first": files[0], "mtime": os.path.getmtime(newest),
+        "date": datetime.datetime.fromtimestamp(os.path.getmtime(newest)).strftime("%Y-%m-%d %H:%M"),
+        "info": f"{size / 1e6:.1f} Mo",
+    }
+
+
 # ---------------------------------------------------------------- autosave
 
 AUTOSAVE_DIR = "autosave"

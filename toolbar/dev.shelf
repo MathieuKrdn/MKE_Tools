@@ -10,6 +10,7 @@
     <memberTool name="mke_ratconverter"/>
     <memberTool name="mke_projectsetup"/>
     <memberTool name="mke_saveup"/>
+    <memberTool name="mke_daily_flipbook"/>
   </toolshelf>
 
     <tool name="mke_ratconverter" label="RAT Converter" icon="mipmapGenerator_logo.svg">
@@ -22,6 +23,11 @@ for widget in QtWidgets.QApplication.topLevelWidgets():
          widget.close()
 ui = RatGeneratorUI(parent=main_window)
 ui.show()]]></script>
+    </tool>
+
+    <tool name="mke_daily_flipbook" label="Daily Flipbook" icon="MISC_flipbook">
+      <script scriptType="python"><![CDATA[import mke_daily
+mke_daily.dailyFlipbook()]]></script>
     </tool>
 
     <tool name="mke_projectsetup" label="Projects" icon="projectSetup_logo.svg">
