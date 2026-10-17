@@ -1275,7 +1275,7 @@ class QueuePanel(QtWidgets.QWidget):
 
         self.buttons = {}
         for key, text in (("node", "Aller au node"), ("log", "Ouvrir le log"), ("folder", "Dossier de sortie"),
-                          ("pause", "Suspendre"), ("requeue", "Relancer"), ("forget", "Retirer")):
+                          ("now", "Lancer maintenant"), ("pause", "Suspendre"), ("requeue", "Relancer"), ("forget", "Retirer")):
             self.buttons[key] = QtWidgets.QPushButton(text)
         self.buttons["requeue"].setObjectName("primary")
         self.buttons["node"].clicked.connect(self._go_to_node)
@@ -1284,6 +1284,8 @@ class QueuePanel(QtWidgets.QWidget):
         self.buttons["pause"].clicked.connect(self._pause)
         self.buttons["requeue"].clicked.connect(lambda: self._act("requeue"))
         self.buttons["forget"].clicked.connect(self._forget)
+        self.buttons["now"].clicked.connect(self._start_now)
+        self.buttons["now"].setToolTip("Annule l'horaire du soir : le job part dès que le worker est libre")
         self.buttons["forget"].setToolTip("Retire le job de cette liste (il reste dans Deadline)")
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -1294,7 +1296,7 @@ class QueuePanel(QtWidgets.QWidget):
         layout.addWidget(self.empty)
         layout.addWidget(self.detail)
         b = self.buttons
-        layout.addLayout(_row(b["node"], b["log"], b["folder"], None, b["forget"], b["pause"], b["requeue"]))
+        layout.addLayout(_row(b["node"], b["log"], b["folder"], None, b["forget"], b["pause"], b["now"], b["requeue"]))
 
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(lambda: self.isVisible() and self.refresh_jobs())
@@ -1379,6 +1381,7 @@ class QueuePanel(QtWidgets.QWidget):
             return
         status = job.get("Status")
         self.buttons["pause"].setText("Reprendre" if status == "Suspended" else "Suspendre")
+        self.buttons["now"].setEnabled(bool(job.get("scheduled")) and status not in self.dl.DONE)
         deps = f"  ·  attend {len(job['deps'])} job(s)" if job.get("deps") else ""
         when = f"  ·  programmé {job['scheduled'][11:16]}" if job.get("scheduled") else ""
         self.detail.setText(f"{job['node']}  ·  {os.path.basename(job['hip'])}{when}{deps}")
@@ -1393,6 +1396,14 @@ class QueuePanel(QtWidgets.QWidget):
         job = self._job()
         if job:
             self._act("resume" if job.get("Status") == "Suspended" else "suspend")
+
+    def _start_now(self):
+        job = self._job()
+        if job and self.info:
+            self.dl.start_now(job)
+            self.dl.write_queue(self.info, [dict(e, scheduled=None) if e["id"] == job["id"] else e
+                                            for e in self.dl.read_queue(self.info)])
+            self.refresh_jobs()
 
     def _forget(self):
         job = self._job()

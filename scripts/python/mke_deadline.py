@@ -280,12 +280,29 @@ def _last_error(job):
         return "voir le log dans Deadline Monitor"
 
 
+def start_now(job):
+    """Drop the 'tonight' schedule and let the job start as soon as the worker is free (dependencies still apply)."""
+    run("-SetJobSetting", job["id"], "ScheduledType", "None")
+    if not job.get("deps"):
+        run("-ReleasePendingJob", job["id"])
+    job["scheduled"] = None
+    return job
+
+
 def action(verb, job_id):
     """suspend / resume / requeue a job."""
     return run({"suspend": "-SuspendJob", "resume": "-ResumeJob", "requeue": "-RequeueJob"}[verb], job_id)
 
 
 # ---------------------------------------------------------------- node right-click menu
+
+def submit_now(node):
+    submit_from_menu(node, tonight=False)
+
+
+def submit_tonight(node):
+    submit_from_menu(node, tonight=True)
+
 
 def submit_from_menu(node, tonight):
     if not can_submit(node):
