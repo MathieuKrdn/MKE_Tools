@@ -14,6 +14,7 @@
 
     <tool name="mke_ratconverter" label="RAT Converter" icon="mipmapGenerator_logo.svg">
       <script scriptType="python"><![CDATA[from ratConverter import RatGeneratorUI
+from hutil.Qt import QtWidgets
 import hou
 main_window = hou.ui.mainQtWindow()
 for widget in QtWidgets.QApplication.topLevelWidgets():
