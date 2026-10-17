@@ -677,3 +677,5 @@ def startup():
     if hou.isUIAvailable():
         hou.setUpdateMode(hou.updateMode.Manual)
         set_autosave(get_pref("autosave", True))
+        import mke_tracking
+        mke_tracking.start_tracking()

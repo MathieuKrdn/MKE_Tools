@@ -4,6 +4,7 @@ projects()          -> the dashboard (also opened at Houdini startup)
 CreateProjectDialog -> "+ Nouveau projet"
 EntitiesDialog      -> "+ Plan / asset"
 """
+import datetime
 import os
 import subprocess
 
@@ -217,6 +218,7 @@ class ProjectsDashboard(QtWidgets.QDialog):
         # 2. shots and assets
         self.entity_tree = QtWidgets.QTreeWidget()
         self.entity_tree.setHeaderHidden(True)
+        self.entity_tree.setColumnCount(2)
         self.entity_tree.currentItemChanged.connect(lambda *_: self._refresh_versions())
         self.entity_button = QtWidgets.QPushButton("+ Plan / asset")
         self.entity_button.clicked.connect(self._edit_entities)
@@ -282,7 +284,13 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.content_tabs = QtWidgets.QTabWidget()
         self.content_tabs.addTab(versions_page, "Versions")
         self.content_tabs.addTab(media_page, "Médias")
-        self.content_tabs.currentChanged.connect(lambda *_: self._refresh_media())
+        self.notes_panel = NotesPanel(self._on_notes_changed)
+        self.time_panel = TimePanel()
+        self.disk_panel = DiskPanel()
+        self.content_tabs.addTab(self.notes_panel, "Notes")
+        self.content_tabs.addTab(self.time_panel, "Temps")
+        self.content_tabs.addTab(self.disk_panel, "Disque")
+        self.content_tabs.currentChanged.connect(lambda *_: (self._refresh_media(), self._refresh_panels()))
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(_column("Projets", projects_box, browse, self.settings_button))
@@ -352,8 +360,10 @@ class ProjectsDashboard(QtWidgets.QDialog):
             f"{info['resolution'][0]}x{info['resolution'][1]}\nscènes : {mke_project.scenes_dir(info) or '(racine)'}"
             f"  ·  cache : {info['cache']}" if info else "")
         if info:
+            statuses = mke_tracking.all_statuses(info)
             project = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Scènes du projet"])
             project.setData(0, QtCore.Qt.UserRole, ("project", {}))
+            _status_item(project, info, mke_tracking.PROJECT_KEY, statuses)
             shots = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Plans"])
             sequences = {}
             for entry in info["shots"]:
@@ -363,11 +373,14 @@ class ProjectsDashboard(QtWidgets.QDialog):
                 start, end = mke_project.shot_range(info, entry)
                 item = QtWidgets.QTreeWidgetItem(sequences[seq], [f"{shot}    {start}-{end}"])
                 item.setData(0, QtCore.Qt.UserRole, ("shot", {"seq": seq, "shot": shot}))
+                _status_item(item, info, entry, statuses)
             assets = QtWidgets.QTreeWidgetItem(self.entity_tree, ["Assets"])
             for asset in info["assets"]:
                 item = QtWidgets.QTreeWidgetItem(assets, [asset])
                 item.setData(0, QtCore.Qt.UserRole, ("asset", {"asset": asset}))
+                _status_item(item, info, f"asset:{asset}", statuses)
             self.entity_tree.expandAll()
+            self.entity_tree.resizeColumnToContents(0)
             if not self._select_current_scene(info):
                 self.entity_tree.setCurrentItem(project)
         self._refresh_versions()
@@ -407,6 +420,28 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.open_button.setEnabled(bool(self.version_list.topLevelItemCount()))
         self._refresh_thumbnail()
         self._refresh_media()
+        self._refresh_panels()
+
+    def selected_key(self):
+        entity = self.selected_entity()
+        return mke_tracking.entity_key(entity[0], **entity[1]) if entity else None
+
+    def _refresh_panels(self):
+        """Notes follow the selected shot; time and disk follow the selected project."""
+        info = self.selected_project()
+        tab = self.content_tabs.currentWidget()
+        if tab is self.notes_panel:
+            self.notes_panel.refresh(info, self.selected_key())
+        elif tab is self.time_panel:
+            self.time_panel.refresh(info)
+        elif tab is self.disk_panel:
+            self.disk_panel.refresh(info)
+
+    def _on_notes_changed(self):
+        """Repaint the status column of the selected shot without rebuilding the whole tree."""
+        item, info, key = self.entity_tree.currentItem(), self.selected_project(), self.selected_key()
+        if item and info and key:
+            _status_item(item, info, key, mke_tracking.all_statuses(info))
 
     def _refresh_media(self):
         """Scan media only while the Médias tab is shown: OUT folders can be large."""
@@ -574,7 +609,7 @@ def _card(title, rows):
             grid.addLayout(field, row, 1)
         else:
             grid.addWidget(field, row, 1)
-    grid.setColumnMinimumWidth(0, 110)
+    grid.setColumnMinimumWidth(0, 110 if any(label for label, _ in rows) else 0)
     grid.setColumnStretch(1, 1)
     return card
 
@@ -811,6 +846,288 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             mke_project.apply_to_scene(self.info)
         self.accept()
         hou.ui.setStatusMessage(f"Réglages de {self.info['name']} enregistrés")
+
+
+# ==================================================================== dashboard panels: notes, time, disk
+
+import mke_tracking
+
+
+def _status_item(item, info, key, statuses):
+    """Second column of the shots tree: colored status + number of open notes."""
+    status = statuses.get(key, "todo")
+    label, color = mke_tracking.STATUS[status]
+    count = mke_tracking.open_count(info, key)
+    item.setText(1, "●" + (f" {count}" if count else ""))
+    item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
+    item.setToolTip(1, f"{label}" + (f", {count} note(s) ouverte(s)" if count else ""))
+
+
+class NotesPanel(QtWidgets.QWidget):
+    """Status and notes (to-do, client feedback) of the selected shot / asset."""
+
+    def __init__(self, on_change, parent=None):
+        super().__init__(parent)
+        self.on_change = on_change
+        self.info = self.key = None
+        self.status_group = QtWidgets.QButtonGroup(self)
+        status_row = QtWidgets.QHBoxLayout()
+        status_row.setSpacing(4)
+        for key, label, color in mke_tracking.STATUSES:
+            button = QtWidgets.QPushButton(label)
+            button.setCheckable(True)
+            button.setFocusPolicy(QtCore.Qt.NoFocus)
+            button.setProperty("status", key)
+            button.toggled.connect(lambda checked, b=button, c=color: b.setStyleSheet(
+                f"padding: 5px 10px; background: {c}; color: white; border: 1px solid {c};" if checked else "padding: 5px 10px;"))
+            button.setStyleSheet("padding: 5px 10px;")
+            self.status_group.addButton(button)
+            status_row.addWidget(button)
+        status_row.addStretch()
+        self.status_group.buttonClicked.connect(self._set_status)
+
+        self.notes = QtWidgets.QListWidget()
+        self.notes.setWordWrap(True)
+        self.notes.itemChanged.connect(self._toggle_done)
+        self.notes.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.notes.customContextMenuRequested.connect(self._menu)
+        self.input = QtWidgets.QLineEdit()
+        self.input.setPlaceholderText("Ajouter une note ou une tâche, Entrée pour valider")
+        self.input.returnPressed.connect(lambda: self._add(False))
+        self.client = QtWidgets.QPushButton("Retour client")
+        self.client.setToolTip("Ajoute le texte comme retour client (marqué en orange)")
+        self.client.clicked.connect(lambda: self._add(True))
+        self.empty = _label("", "hint")
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(_section("Statut"))
+        layout.addLayout(status_row)
+        layout.addWidget(_section("Notes et retours"))
+        layout.addWidget(self.notes, 1)
+        layout.addWidget(self.empty)
+        layout.addLayout(_row(self.input, self.client))
+
+    def refresh(self, info, key):
+        self.info, self.key = info, key
+        self.setEnabled(bool(info and key))
+        self.notes.blockSignals(True)
+        self.notes.clear()
+        if not (info and key):
+            self.notes.blockSignals(False)
+            return
+        data = mke_tracking.entity_notes(info, key)
+        for button in self.status_group.buttons():
+            button.setChecked(button.property("status") == data["status"])
+        for note in sorted(data["notes"], key=lambda n: (n["done"], n["date"])):
+            prefix = "Client  ·  " if note["client"] else ""
+            item = QtWidgets.QListWidgetItem(f"{prefix}{note['text']}\n{note['date']}  ·  {note['author']}")
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if note["done"] else QtCore.Qt.Unchecked)
+            item.setData(QtCore.Qt.UserRole, note["id"])
+            if note["done"]:
+                item.setForeground(QtGui.QBrush(QtGui.QColor("#777777")))
+                font = item.font(); font.setStrikeOut(True); item.setFont(font)
+            elif note["client"]:
+                item.setForeground(QtGui.QBrush(QtGui.QColor(mke_tracking.STATUS["retours"][1])))
+            self.notes.addItem(item)
+        self.notes.blockSignals(False)
+        self.empty.setText("" if data["notes"] else f"Aucune note pour {mke_tracking.key_label(key)}.")
+        self.empty.setVisible(not data["notes"])
+
+    def _set_status(self, button):
+        mke_tracking.set_status(self.info, self.key, button.property("status"))
+        self.on_change()
+
+    def _add(self, client):
+        text = self.input.text().strip()
+        if text:
+            mke_tracking.add_note(self.info, self.key, text, client=client)
+            if client and mke_tracking.entity_notes(self.info, self.key)["status"] in ("review", "ok"):
+                mke_tracking.set_status(self.info, self.key, "retours")  # client feedback reopens the shot
+            self.input.clear()
+            self.refresh(self.info, self.key)
+            self.on_change()
+
+    def _toggle_done(self, item):
+        mke_tracking.set_note_done(self.info, self.key, item.data(QtCore.Qt.UserRole), item.checkState() == QtCore.Qt.Checked)
+        self.refresh(self.info, self.key)
+        self.on_change()
+
+    def _menu(self, position):
+        item = self.notes.itemAt(position)
+        if item is None:
+            return
+        menu = QtWidgets.QMenu(self)
+        delete = menu.addAction("Supprimer la note")
+        if menu.exec_(self.notes.mapToGlobal(position)) == delete:
+            mke_tracking.delete_note(self.info, self.key, item.data(QtCore.Qt.UserRole))
+            self.refresh(self.info, self.key)
+            self.on_change()
+
+
+class TimePanel(QtWidgets.QWidget):
+    """Time spent on the selected project, counted automatically while Houdini is in use."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.info = None
+        self.today, self.week, self.total = (_label("", "title") for _ in range(3))
+        for value in (self.today, self.week, self.total):
+            value.setWordWrap(False)
+        cards = QtWidgets.QHBoxLayout()
+        for title, value in (("Aujourd'hui", self.today), ("Cette semaine", self.week), ("Total projet", self.total)):
+            cards.addWidget(_card(title, [("", value)]))
+        self.table = QtWidgets.QTreeWidget()
+        self.table.setHeaderLabels(["Jour / plan", "Temps"])
+        self.table.setAlternatingRowColors(True)
+        export = QtWidgets.QPushButton("Exporter en CSV (factures)")
+        export.clicked.connect(self._export)
+        hint = _label(f"Compté automatiquement tant que tu utilises Houdini sur une scène du projet. "
+                      f"Après {mke_tracking.IDLE_SECONDS // 60} min sans activité, le compteur s'arrête.", "hint")
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(cards)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(hint)
+        layout.addLayout(_row(None, export))
+
+    def refresh(self, info):
+        self.info = info
+        self.table.clear()
+        if not info:
+            return
+        summary = mke_tracking.time_summary(info)
+        self.today.setText(mke_tracking.hours(summary["today"]))
+        self.week.setText(mke_tracking.hours(summary["week"]))
+        self.total.setText(mke_tracking.hours(summary["total"]))
+        for day, seconds, per_key in summary["days"]:
+            day_name = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche")[day.weekday()]
+            day_item = QtWidgets.QTreeWidgetItem(self.table, [f"{day_name} {day:%d/%m/%Y}", mke_tracking.hours(seconds)])
+            for key, value in sorted(per_key.items(), key=lambda kv: -kv[1]):
+                QtWidgets.QTreeWidgetItem(day_item, [mke_tracking.key_label(key), mke_tracking.hours(value)])
+        if self.table.topLevelItemCount():
+            self.table.topLevelItem(0).setExpanded(True)
+        self.table.resizeColumnToContents(0)
+
+    def _export(self):
+        if not self.info:
+            return
+        default = os.path.join(self.info["root"], "PIPELINE", f"temps_{self.info['name']}_{datetime.date.today():%Y%m%d}.csv")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exporter le temps", default, "CSV (*.csv)")
+        if path:
+            mke_tracking.export_csv(self.info, path)
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
+
+
+class DiskPanel(QtWidgets.QWidget):
+    """Cache versions of the project with their size; old ones can be sent to the Recycle Bin."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.info = None
+        self.caches = {}
+        self.summary = _label("Clique « Analyser » pour mesurer les caches du projet.", "hint")
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setHeaderLabels(["Cache / version", "Taille", "Modifié"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.itemChanged.connect(lambda *_: self._refresh_selection())
+        analyse = QtWidgets.QPushButton("Analyser")
+        analyse.clicked.connect(self.scan)
+        self.keep = QtWidgets.QSpinBox()
+        self.keep.setRange(1, 20)
+        self.keep.setValue(2)
+        self.keep.setPrefix("garder ")
+        self.keep.setSuffix(" dernières")
+        select_old = QtWidgets.QPushButton("Cocher les anciennes")
+        select_old.clicked.connect(self._select_old)
+        self.delete_button = QtWidgets.QPushButton("Corbeille")
+        self.delete_button.setObjectName("primary")
+        self.delete_button.clicked.connect(self._delete)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.summary)
+        layout.addWidget(self.tree, 1)
+        layout.addLayout(_row(analyse, None, self.keep, select_old, self.delete_button))
+        self._refresh_selection()
+
+    def refresh(self, info):
+        if info is not self.info and (not info or not self.info or info["root"] != self.info["root"]):
+            self.caches = {}
+            self.tree.clear()
+            self.summary.setText("Clique « Analyser » pour mesurer les caches du projet.")
+        self.info = info
+        self._refresh_selection()
+
+    def scan(self):
+        if not self.info:
+            return
+        self.summary.setText("Analyse en cours...")
+        QtWidgets.QApplication.processEvents()
+        self.caches = mke_tracking.scan_caches(self.info, progress=lambda _: QtWidgets.QApplication.processEvents())
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        total = 0
+        for cache, versions in sorted(self.caches.items(), key=lambda kv: -sum(v["size"] for v in kv[1])):
+            size = sum(v["size"] for v in versions)
+            total += size
+            parent = QtWidgets.QTreeWidgetItem(self.tree, [f"{cache}   ({len(versions)} versions)", mke_tracking.human(size), ""])
+            for v in versions:
+                item = QtWidgets.QTreeWidgetItem(parent, [v["version"], mke_tracking.human(v["size"]),
+                                                          datetime.datetime.fromtimestamp(v["mtime"]).strftime("%Y-%m-%d %H:%M")])
+                item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+                item.setCheckState(0, QtCore.Qt.Unchecked)
+                item.setData(0, QtCore.Qt.UserRole, v)
+        self.tree.blockSignals(False)
+        self.tree.resizeColumnToContents(0)
+        self.summary.setText(f"{mke_tracking.human(total)} de caches dans {len(self.caches)} dossiers de cache.")
+        self._refresh_selection()
+
+    def checked(self):
+        result = []
+        iterator = QtWidgets.QTreeWidgetItemIterator(self.tree)
+        while iterator.value():
+            item = iterator.value()
+            if item.data(0, QtCore.Qt.UserRole) and item.checkState(0) == QtCore.Qt.Checked:
+                result.append(item.data(0, QtCore.Qt.UserRole))
+            iterator += 1
+        return result
+
+    def _select_old(self):
+        old = set(mke_tracking.old_versions(self.caches, keep=self.keep.value()))
+        self.tree.blockSignals(True)
+        iterator = QtWidgets.QTreeWidgetItemIterator(self.tree)
+        while iterator.value():
+            data = iterator.value().data(0, QtCore.Qt.UserRole)
+            if data:
+                iterator.value().setCheckState(0, QtCore.Qt.Checked if data["path"] in old else QtCore.Qt.Unchecked)
+            iterator += 1
+        self.tree.blockSignals(False)
+        self._refresh_selection()
+
+    def _refresh_selection(self):
+        selection = self.checked() if self.tree.topLevelItemCount() else []
+        size = sum(v["size"] for v in selection)
+        self.delete_button.setEnabled(bool(selection))
+        self.delete_button.setText(f"Corbeille ({mke_tracking.human(size)})" if selection else "Corbeille")
+        self.delete_button.setToolTip("Envoie les versions cochées dans la Corbeille de Windows (récupérables)")
+
+    def _delete(self):
+        selection = self.checked()
+        if not selection:
+            return
+        size = mke_tracking.human(sum(v["size"] for v in selection))
+        listing = "\n".join(os.path.relpath(v["path"], self.info["root"]) for v in selection[:12])
+        more = f"\n... et {len(selection) - 12} autres" if len(selection) > 12 else ""
+        if hou.ui.displayMessage(f"Mettre {len(selection)} versions ({size}) à la corbeille ?\n\n{listing}{more}\n\n"
+                                 "Tu pourras les restaurer depuis la Corbeille de Windows.",
+                                 buttons=("Mettre à la corbeille", "Annuler"), default_choice=1, close_choice=1) != 0:
+            return
+        try:
+            mke_tracking.recycle([v["path"] for v in selection])
+        except Exception as error:
+            hou.ui.displayMessage(str(error), severity=hou.severityType.Warning)
+        self.scan()
 
 
 # ==================================================================== new project
