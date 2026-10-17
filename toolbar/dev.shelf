@@ -24,9 +24,9 @@ ui = RatGeneratorUI(parent=main_window)
 ui.show()]]></script>
     </tool>
 
-    <tool name="mke_projectsetup" label="Project Setup" icon="projectSetup_logo.svg">
+    <tool name="mke_projectsetup" label="Projects" icon="projectSetup_logo.svg">
       <script scriptType="python"><![CDATA[import projectSetup as setup
-setup.projectSetup()]]></script>
+setup.projects()]]></script>
     </tool>
 
     <tool name="mke_saveup" label="Save Up" icon="saveUp_logo.svg">

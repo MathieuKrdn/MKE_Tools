@@ -154,6 +154,29 @@ def add_recent(root):
         json.dump(projects[:15], f, indent=4)
 
 
+def _prefs_file():
+    return os.path.join(hou.getenv("HOUDINI_USER_PREF_DIR") or os.path.expanduser("~"), "mke_projects_prefs.json")
+
+
+def get_pref(key, default=None):
+    try:
+        with open(_prefs_file(), encoding="utf-8") as f:
+            return json.load(f).get(key, default)
+    except (OSError, ValueError):
+        return default
+
+
+def set_pref(key, value):
+    try:
+        with open(_prefs_file(), encoding="utf-8") as f:
+            prefs = json.load(f)
+    except (OSError, ValueError):
+        prefs = {}
+    prefs[key] = value
+    with open(_prefs_file(), "w", encoding="utf-8") as f:
+        json.dump(prefs, f, indent=4)
+
+
 def latest_scene(info):
     scenes = []
     for folder, _, files in os.walk(os.path.join(info["root"], SCENES_DIR)):
