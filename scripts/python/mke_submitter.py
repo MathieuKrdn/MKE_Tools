@@ -112,7 +112,7 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     job_id = mke_deadline._parse(results.stdout).get("JobID")
     if job_id and info:  # show it in the Projects dashboard, File tab
         mke_deadline.write_queue(info, mke_deadline.read_queue(info) + [{
-            "id": job_id, "name": f"{jobName}  {version}  (rendu)", "node": hda.path(), "hip": hou.hipFile.path(),
+            "id": job_id, "name": f"{jobName}  {version}  (render)", "node": hda.path(), "hip": hou.hipFile.path(),
             "frames": [int(self.startFrame), int(self.endFrame)], "log": log.replace("\\", "/"),
             "output": os.path.dirname(self.exr_save_path).replace("\\", "/"),
             "submitted": datetime.datetime.now().isoformat(timespec="seconds"), "scheduled": None, "deps": []}])
