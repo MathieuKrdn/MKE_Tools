@@ -98,9 +98,11 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     log = os.path.join(log_dir, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_") + f"{jobName}_{version}.log")
     pluginInfoFilename = os.path.join(tempfile.gettempdir(), "USD_plugin_info.job")
     with open(pluginInfoFilename, "w", encoding="utf-8") as writer:
+        # run through cmd: only the plugin's shell mode feeds "Progress: N%" lines to the task progress bar
+        writer.write("ShellExecute=True\nShell=cmd\n")
         writer.write("Executable={}\n".format(python.replace("\\", "/")))
-        writer.write('Arguments="{}" "{}" "{}" <STARTFRAME> <ENDFRAME> {} "{}" {} "{}"\n'.format(
-            script, husk, self.scene_file, int(self.IncFrame or 1), output, renderer, log).replace("\\", "/"))
+        writer.write('Arguments="{}" "{}" "{}" "{}" <STARTFRAME> <ENDFRAME> {} "{}" {} "{}"\n'.format(
+            python, script, husk, self.scene_file, int(self.IncFrame or 1), output, renderer, log).replace("\\", "/"))
         writer.write("StartupDirectory={}\n".format(os.path.dirname(self.scene_file).replace("\\", "/")))
 
     # Setup the command line arguments.
