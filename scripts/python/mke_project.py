@@ -672,10 +672,39 @@ def set_autosave(enabled):
         _autosave_timer.start(AUTOSAVE_MINUTES * 60 * 1000)
 
 
+NON_COMMERCIAL = ("Apprentice", "ApprenticeHD", "Education")
+_licence_timer = None
+_licence_warned = False
+
+
+def check_licence():
+    """Warn once per session when Houdini runs non-commercial: every save would become .hipnc / .usdnc,
+    and SideFX does not let those files come back to Indie. Returns True when the session is fine."""
+    global _licence_warned
+    category = hou.licenseCategory().name()
+    if category not in NON_COMMERCIAL:
+        return True
+    if not _licence_warned and hou.isUIAvailable():
+        _licence_warned = True
+        hou.ui.displayMessage(
+            f"Houdini is running with a {category} licence, not Indie.\n\n"
+            "Do not save: scenes would become .hipnc and USD exports .usdnc, and they cannot be "
+            "turned back into Indie files.\n\nCheck the License Administrator, then restart Houdini.",
+            severity=hou.severityType.Warning, title="Not in Indie")
+    return False
+
+
 def startup():
-    """Houdini start (pythonrc.py): Manual update mode so heavy scenes do not cook on open, and autosave."""
+    """Houdini start (pythonrc.py): Manual update mode so heavy scenes do not cook on open, autosave,
+    and a licence check every 30 s (an asset can switch a session to non-commercial mid-way)."""
+    global _licence_timer
     if hou.isUIAvailable():
         hou.setUpdateMode(hou.updateMode.Manual)
         set_autosave(get_pref("autosave", True))
         import mke_tracking
         mke_tracking.start_tracking()
+        from hutil.Qt import QtCore
+        _licence_timer = QtCore.QTimer()
+        _licence_timer.timeout.connect(check_licence)
+        _licence_timer.start(30 * 1000)
+        check_licence()
