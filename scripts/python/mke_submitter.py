@@ -55,7 +55,8 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
         writer.write("SecondaryPool={}\n".format(secondary_pool.strip('"')))
         writer.write("Group={}\n".format(group.strip('"')))
         writer.write("TaskTimeoutMinutes={}\n".format(jobTimeOut))
-        writer.write("ChunkSize={}\n".format(jobFramesPerTask))  # Use ChunkSize instead of FramesPerTask
+        # picked frames: one per task, a chunk would render everything between its first and last frame
+        writer.write("ChunkSize={}\n".format(1 if self.picked_frames else jobFramesPerTask))
         if suspended:
             writer.write("InitialStatus=Suspended\n")  # Use InitialStatus instead of SubmitSuspended
         if exr_save_path:
@@ -64,7 +65,9 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
         #writer.write("RenderEngine={}\n".format(renderEngine))  # Add render engine to environment
 
         # if a framerange overide is not specified then just grab the nsi file range from the files
-        if self.IncFrame == 1:
+        if self.picked_frames:
+            FrameList = self.picked_frames
+        elif self.IncFrame == 1:
             FrameList = "{0}-{1}".format(self.startFrame, self.endFrame)
         #elif "FML" in hda.name():
             #FrameList = "{0},{1},{2}".format(self.startFrame, self.IncFrame, self.endFrame)
@@ -121,6 +124,20 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     QtWidgets.QMessageBox.information(None, "Submission Results", results.stdout)
     hda.setColor(hou.Color((0, 1, 0)))  # Set color to green on successful submission
     hda.parm("exportexr").set(exr_save_path)
+
+
+def parse_frames(text, start, end):
+    """'1318, 1336 1353-1355' -> '1318,1336,1353-1355' for Deadline. Every frame must be in the node's range
+    (the USD is exported for that range only). Raises ValueError with a readable message."""
+    tokens = [t for t in re.split(r"[,;\s]+", text.strip()) if t]
+    for token in tokens:
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", token)
+        if not match:
+            raise ValueError(f"'{token}' is not a frame (use 1318 or 1318-1320).")
+        first, last = int(match.group(1)), int(match.group(2) or match.group(1))
+        if first > last or first < int(start) or last > int(end):
+            raise ValueError(f"'{token}' is outside the node's frame range {int(start)}-{int(end)}.")
+    return ",".join(tokens)
 
 
 #---------------- WINDOW ----------------#
@@ -293,6 +310,14 @@ class DeadlineSubmitUI(QtWidgets.QDialog):
         machine_label.setStyleSheet("font-weight: bold;")
         form.addRow(machine_label, self.machine_limit)
 
+        self.frame_list = QtWidgets.QLineEdit()
+        self.frame_list.setPlaceholderText("All ({}-{})  or e.g. 1318, 1336, 1353".format(startFrame, endFrame))
+        self.frame_list.setToolTip("Only render these frames (one task each). Ranges work too: 1318-1320.")
+        self.frame_list.setStyleSheet("background-color: #404040; color: white; border: 1px solid #666666; padding: 4px;")
+        frame_list_label = QtWidgets.QLabel("Only Frames:")
+        frame_list_label.setStyleSheet("font-weight: bold;")
+        form.addRow(frame_list_label, self.frame_list)
+
         layout.addWidget(form_widget)
 
         # Add some spacing
@@ -329,6 +354,11 @@ class DeadlineSubmitUI(QtWidgets.QDialog):
 
     def on_submit_clicked(self):
         """Handles the submit button click event."""
+        try:
+            self.picked_frames = parse_frames(self.frame_list.text(), self.startFrame, self.endFrame)
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(self, "Only Frames", str(error))
+            return
         # Create a styled dark theme message box (no emoji)
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setWindowTitle("Deadline Submission")
