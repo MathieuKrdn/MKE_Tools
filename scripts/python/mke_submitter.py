@@ -108,6 +108,10 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
             python, script, husk, self.scene_file, int(self.IncFrame or 1), output, renderer, log).replace("\\", "/"))
         writer.write("StartupDirectory={}\n".format(os.path.dirname(self.scene_file).replace("\\", "/")))
 
+    # Copy of the scene next to the USD sent to the farm (mwrite -n: the open scene keeps its own path)
+    hip_copy = os.path.splitext(self.scene_file)[0] + os.path.splitext(hou.hipFile.path())[1]
+    hou.hscript('mwrite -n "{}"'.format(hip_copy.replace("\\", "/")))
+
     # Setup the command line arguments.
     arguments = [jobInfoFilename, pluginInfoFilename]
 
