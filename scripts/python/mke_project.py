@@ -127,7 +127,9 @@ def apply_to_scene(info):
 
 def on_scene_load():
     """Called by 456.py: re-point $JOB/$CACHE on the project the .hip lives in."""
+    global _origin
     hip = hou.hipFile.path()
+    _origin = None if hou.hipFile.isNewFile() else _slash(hip)  # the next version saved is based on this one
     if hou.hipFile.isNewFile() or not os.path.isfile(hip):
         return None
     info = find_project(os.path.dirname(hip))
@@ -420,8 +422,13 @@ def thumbnail_path(hip):
     return _slash(os.path.join(folder, THUMBS_DIR, os.path.splitext(name)[0] + ".jpg"))
 
 
+COMMENT_PARENT_RE = re.compile(r"\b(?:from|based on|base)\s+v0*(\d+)\b", re.IGNORECASE)  # "back from v58"
+
+
 def list_versions(folder):
-    """Scenes directly in folder, newest first, with their comment, author, date and thumbnail."""
+    """Scenes directly in folder, newest first, with their comment, author, date and thumbnail.
+    "parent" is the scene a version was made from: recorded at save, else read from a "from v58" comment,
+    else the previous number (old versions, "inferred": True). Autosaves hang on the version they autosave."""
     if not os.path.isdir(folder):
         return []
     meta = _read_versions(folder)
@@ -435,31 +442,109 @@ def list_versions(folder):
         mtime = os.path.getmtime(path)
         thumb = thumbnail_path(path)
         versions.append({
-            "path": path, "file": name, "mtime": mtime,
+            "path": path, "file": name, "mtime": mtime, "autosave": False,
+            "number": int(match.group(1)) if match else None,
+            "stem": VERSION_RE.sub("", os.path.splitext(name)[0]),
             "version": f"v{int(match.group(1)):04d}" if match else "-",
             "date": info.get("date") or datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
             "user": info.get("user", ""), "comment": info.get("comment", ""),
-            "thumb": thumb if os.path.isfile(thumb) else None,
+            "parent": _slash(os.path.join(folder, info["parent"])) if info.get("parent") else None,
+            "inferred": False, "thumb": thumb if os.path.isfile(thumb) else None,
         })
+    by_number = {(v["stem"], v["number"]): v["path"] for v in versions if v["number"] is not None}
+    for v in versions:
+        if v["parent"] or v["number"] is None:
+            continue
+        hint = COMMENT_PARENT_RE.search(v["comment"])
+        if hint and (v["stem"], int(hint.group(1))) in by_number:
+            v["parent"] = by_number[(v["stem"], int(hint.group(1)))]
+        else:
+            older = [n for s, n in by_number if s == v["stem"] and n < v["number"]]
+            v["parent"] = by_number[(v["stem"], max(older))] if older else None
+            v["inferred"] = bool(older)
     autosaves = os.path.join(folder, AUTOSAVE_DIR)
     for name in os.listdir(autosaves) if os.path.isdir(autosaves) else []:
         if name.endswith(HIP_EXT):
             path = _slash(os.path.join(autosaves, name))
             mtime = os.path.getmtime(path)
             versions.append({
-                "path": path, "file": name, "mtime": mtime, "version": "auto",
+                "path": path, "file": name, "mtime": mtime, "version": "auto", "autosave": True,
                 "date": datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"), "user": "",
                 "comment": f"Autosave of {name.replace(AUTOSAVE_SUFFIX, '')}", "thumb": None,
+                "parent": autosave_source(path), "inferred": False,
             })
     return sorted(versions, key=lambda v: v["mtime"], reverse=True)
 
 
-def record_version(hip, comment=""):
-    """Store author, date and comment of a saved scene, and grab a viewport thumbnail when there is a UI."""
+GRAPH_LANES_MAX = 8
+
+
+def version_graph(versions):
+    """Git-like lanes for versions listed newest first. Per row: {"lane": column of the dot,
+    "lines": [(from_lane, to_lane, "top"|"bottom")]}: "top" goes from the row's top edge to the dot height,
+    "bottom" from the dot height to the row's bottom edge. A branch opens a new lane and joins its parent's lane
+    on the parent's row."""
+    paths = {v["path"] for v in versions}
+    seen, lanes, rows = set(), [], []
+    for v in versions:
+        path = v["path"]
+        waiting = [i for i, p in enumerate(lanes) if p == path]
+        if waiting:
+            lane = waiting[0]
+        else:
+            lane = lanes.index(None) if None in lanes else len(lanes)
+            lanes += [None] * (lane + 1 - len(lanes))
+        lines = [(i, lane if p == path else i, "top") for i, p in enumerate(lanes) if p is not None]
+        for i in waiting:
+            lanes[i] = None
+        seen.add(path)
+        parent = v.get("parent")
+        lanes[lane] = parent if parent in paths and parent not in seen else None
+        while lanes and lanes[-1] is None:
+            lanes.pop()
+        lines += [(i, i, "bottom") for i, p in enumerate(lanes) if p is not None]
+        rows.append({"lane": min(lane, GRAPH_LANES_MAX - 1), "lines": [
+            (min(a, GRAPH_LANES_MAX - 1), min(b, GRAPH_LANES_MAX - 1), part) for a, b, part in lines]})
+    return rows
+
+
+def _parent_ref(folder, parent):
+    same_folder = os.path.normcase(os.path.dirname(os.path.abspath(parent))) == os.path.normcase(os.path.abspath(folder))
+    return os.path.basename(parent) if same_folder else _slash(parent)
+
+
+def set_parent(hip, parent):
+    """Record which scene hip was made from (a file name when both are in the same folder)."""
     folder, name = os.path.split(hip)
     meta = _read_versions(folder)
-    meta[name] = {"comment": comment, "user": user_trigram(),
-                  "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    meta.setdefault(name, {})["parent"] = _parent_ref(folder, parent)
+    with open(os.path.join(folder, VERSIONS_FILE), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=4, ensure_ascii=False)
+
+
+_origin = None  # scene the session was loaded from or last saved as
+
+
+def _on_hip_event(event_type):
+    """After any save under a new name (Save Up, Save As, Houdini's +): remember the scene it came from."""
+    global _origin
+    if event_type != hou.hipFileEventType.AfterSave:
+        return
+    hip = _slash(hou.hipFile.path())  # session name: autosaves and mwrite -n copies do not change it
+    if _origin and hip != _origin and os.path.isfile(hip):
+        if not _read_versions(os.path.dirname(hip)).get(os.path.basename(hip), {}).get("parent"):
+            set_parent(hip, _origin)
+    _origin = hip
+
+
+def record_version(hip, comment="", parent=None):
+    """Store author, date, comment and parent scene of a saved scene, and grab a viewport thumbnail when there is a UI."""
+    folder, name = os.path.split(hip)
+    meta = _read_versions(folder)
+    parent = _parent_ref(folder, parent) if parent else meta.get(name, {}).get("parent")  # set by _on_hip_event
+    meta[name] = {"comment": comment, "user": user_trigram(), "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    if parent:
+        meta[name]["parent"] = parent
     with open(os.path.join(folder, VERSIONS_FILE), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=4, ensure_ascii=False)
     capture_thumbnail(hip)
@@ -489,9 +574,10 @@ def capture_thumbnail(hip):
 
 def save_version(comment=""):
     """Save Up: next free version of the current scene, with its comment."""
+    parent = None if hou.hipFile.isNewFile() else _slash(hou.hipFile.path())
     new_path = free_version_path(version_up_path(hou.hipFile.path()))
     hou.hipFile.save(new_path)
-    record_version(new_path, comment)
+    record_version(new_path, comment, parent)
     return new_path
 
 
@@ -522,6 +608,9 @@ def open_scene(hip):
         # so Ctrl+S never writes back into autosave/ nor over a real version.
         hou.hipFile.setName(free_version_path(version_up_path(original)))
     info = on_scene_load()  # 456.py also does it in Houdini; explicit so it works everywhere
+    if original:
+        global _origin
+        _origin = original  # the version saved from a recovered autosave is based on the autosaved scene
     if info:
         add_recent(info["root"])
     return info
@@ -698,6 +787,8 @@ def startup():
     """Houdini start (pythonrc.py): Manual update mode so heavy scenes do not cook on open, autosave,
     and a licence check every 30 s (an asset can switch a session to non-commercial mid-way)."""
     global _licence_timer
+    if _on_hip_event not in hou.hipFile.eventCallbacks():
+        hou.hipFile.addEventCallback(_on_hip_event)
     if hou.isUIAvailable():
         hou.setUpdateMode(hou.updateMode.Manual)
         set_autosave(get_pref("autosave", True))

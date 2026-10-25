@@ -82,6 +82,66 @@ def _column(title, widget, *buttons):
     return column
 
 
+AUTOSAVE_COLOR = "#e0a030"
+LANE_COLORS = ["#5b8cc8", "#6cc070", "#c879d0", "#4fc1c1", "#e07070", "#c8b45b", "#8f8fe0", "#a0a0a0"]
+GRAPH_ROLE = QtCore.Qt.UserRole + 1
+LANE_WIDTH = 14
+
+
+class VersionGraphDelegate(QtWidgets.QStyledItemDelegate):
+    """Version column: git-like lines (which scene each version was made from) left of the version name.
+    Dots: filled = saved version, hollow orange square = autosave, faded = lineage guessed from the numbers."""
+
+    def _graph_width(self, index):
+        graph = index.data(GRAPH_ROLE)
+        return graph["lanes"] * LANE_WIDTH + 6 if graph else 0  # same for every row: names stay aligned
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        return QtCore.QSize(size.width() + self._graph_width(index), max(size.height(), 22))
+
+    def paint(self, painter, option, index):
+        graph = index.data(GRAPH_ROLE)
+        if not graph:
+            return super().paint(painter, option, index)
+        width = self._graph_width(index)
+        text_option = QtWidgets.QStyleOptionViewItem(option)
+        text_option.rect = option.rect.adjusted(width, 0, 0, 0)
+        background = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(background, index)
+        background.text = ""
+        widget = option.widget
+        style = widget.style() if widget else QtWidgets.QApplication.style()
+        style.drawPrimitive(QtWidgets.QStyle.PE_PanelItemViewItem, background, painter, widget)  # selection / alternate row
+        super().paint(painter, text_option, index)
+
+        rect = option.rect
+        x = lambda lane: rect.left() + 6 + lane * LANE_WIDTH + LANE_WIDTH // 2
+        top, mid, bottom = rect.top(), rect.center().y(), rect.bottom() + 1
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        for start, end, part in graph["lines"]:
+            lane = start if part == "top" else end
+            painter.setPen(QtGui.QPen(QtGui.QColor(LANE_COLORS[lane % len(LANE_COLORS)]), 2))
+            if part == "top":
+                painter.drawLine(QtCore.QPointF(x(start), top), QtCore.QPointF(x(end), mid))
+            else:
+                painter.drawLine(QtCore.QPointF(x(start), mid), QtCore.QPointF(x(end), bottom))
+        dot = QtCore.QRectF(x(graph["lane"]) - 4.5, mid - 4.5, 9, 9)
+        if graph["autosave"]:
+            painter.setPen(QtGui.QPen(QtGui.QColor(AUTOSAVE_COLOR), 2))
+            painter.setBrush(option.palette.base())
+            painter.drawRect(dot)
+        else:
+            color = QtGui.QColor(LANE_COLORS[graph["lane"] % len(LANE_COLORS)])
+            if graph["inferred"]:
+                color.setAlpha(120)
+            painter.setPen(QtGui.QPen(color.darker(130), 1))
+            painter.setBrush(color)
+            painter.drawEllipse(dot)
+        painter.restore()
+
+
 try:  # Qt Multimedia ships with Houdini 22 (PySide6); without it the preview falls back to the external player
     from PySide6 import QtMultimedia, QtMultimediaWidgets
     from PySide6.QtCore import QLoggingCategory
@@ -250,6 +310,9 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.version_list.setAlternatingRowColors(True)
         self.version_list.currentItemChanged.connect(lambda *_: self._refresh_thumbnail())
         self.version_list.itemDoubleClicked.connect(lambda *_: self._open_version())
+        self.version_list.setItemDelegateForColumn(0, VersionGraphDelegate(self.version_list))
+        self.version_list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.version_list.customContextMenuRequested.connect(self._version_menu)
         self.thumbnail = QtWidgets.QLabel()
         self.thumbnail.setAlignment(QtCore.Qt.AlignCenter)
         self.thumbnail.setFixedHeight(200)
@@ -428,11 +491,26 @@ class ProjectsDashboard(QtWidgets.QDialog):
         self.version_list.clear()
         info, entity = self.selected_project(), self.selected_entity()
         if info and entity:
-            for version in mke_project.list_versions(mke_project.entity_dir(info, entity[0], **entity[1])):
+            versions = mke_project.list_versions(mke_project.entity_dir(info, entity[0], **entity[1]))
+            names = {v["path"]: v["version"] if v["version"] != "-" else v["file"] for v in versions}
+            graphs = mke_project.version_graph(versions)
+            lanes = max([g["lane"] for g in graphs] + [max(a, b) for g in graphs for a, b, _ in g["lines"]], default=0) + 1
+            for version, graph in zip(versions, graphs):
                 item = QtWidgets.QTreeWidgetItem([version["version"], version["date"], version["user"], version["comment"]])
                 item.setData(0, QtCore.Qt.UserRole, version)
-                item.setToolTip(0, version["file"])
+                item.setData(0, GRAPH_ROLE, dict(graph, lanes=lanes, autosave=version["autosave"], inferred=version["inferred"]))
+                parent = names.get(version["parent"]) or (os.path.basename(version["parent"]) if version["parent"] else None)
+                lineage = (f"\nBased on {parent}" + (" (guessed from the numbers, right-click > Based on... to fix)"
+                                                     if version["inferred"] else "")) if parent else ""
+                item.setToolTip(0, version["file"] + lineage)
                 item.setToolTip(3, version["comment"])
+                if version["autosave"]:
+                    for column in range(4):
+                        item.setForeground(column, QtGui.QColor(AUTOSAVE_COLOR))
+                    font = item.font(0)
+                    font.setItalic(True)
+                    for column in range(4):
+                        item.setFont(column, font)
                 self.version_list.addTopLevelItem(item)
             for column in range(3):
                 self.version_list.resizeColumnToContents(column)
@@ -604,6 +682,29 @@ class ProjectsDashboard(QtWidgets.QDialog):
         mke_project.open_scene(version["path"])
         self.accept()
         hou.ui.setStatusMessage(f"{version['file']} opened")
+
+    def _version_menu(self, position):
+        item = self.version_list.itemAt(position)
+        if not item or item.data(0, QtCore.Qt.UserRole)["autosave"]:
+            return
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Based on...", lambda: self._set_parent(item.data(0, QtCore.Qt.UserRole)))
+        menu.exec_(self.version_list.viewport().mapToGlobal(position))
+
+    def _set_parent(self, version):
+        """Fix the lineage of an old version: pick the scene it was made from."""
+        others = [self.version_list.topLevelItem(i).data(0, QtCore.Qt.UserRole)
+                  for i in range(self.version_list.topLevelItemCount())]
+        others = [v for v in others if not v["autosave"] and v["mtime"] < version["mtime"]]
+        if not others:
+            return
+        labels = [f"{v['version']}   {v['comment']}" if v["version"] != "-" else v["file"] for v in others]
+        current = [i for i, v in enumerate(others) if v["path"] == version["parent"]]
+        picked = hou.ui.selectFromList(labels, default_choices=current, exclusive=True,
+                                       title="Based on", message=f"Which version was {version['version']} made from?")
+        if picked:
+            mke_project.set_parent(version["path"], others[picked[0]]["path"])
+            self._refresh_versions()
 
     def _new_scene(self):
         info, entity = self.selected_project(), self.selected_entity()
