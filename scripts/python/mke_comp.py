@@ -218,7 +218,22 @@ def compFromRender():
 
 _dialog = None
 
-from hutil.Qt import QtCore, QtWidgets  # noqa: E402  (UI only below)
+def parse_paths(text):
+    """Pasted text -> folders. One path per line (or ';'), Explorer "Copy as path"
+    quotes, file:/// links and $VARS accepted; a pasted .exr gives its folder."""
+    out = []
+    for line in re.split(r"[\r\n;]+", text):
+        p = line.strip().strip('"').strip()
+        if p.lower().startswith("file:///"):
+            p = p[8:]
+        if not p:
+            continue
+        p = hou.text.expandString(p).replace("\\", "/")
+        out.append(os.path.dirname(p) if os.path.isfile(p) else p)
+    return out
+
+
+from hutil.Qt import QtCore, QtGui, QtWidgets  # noqa: E402  (UI only below)
 
 
 class CompDialog(QtWidgets.QDialog):
@@ -239,7 +254,13 @@ class CompDialog(QtWidgets.QDialog):
         self.layers.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.layers.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
         self.passes = QtWidgets.QListWidget()
-        add = QtWidgets.QPushButton("Add folders...")
+        self.paste = QtWidgets.QPlainTextEdit()
+        self.paste.setPlaceholderText("Paste folder paths here, one per line (\"Copy as path\" "
+                                      "quotes are fine), then Add paths. Ctrl+V on the list works too.")
+        self.paste.setFixedHeight(60)
+        add_paths = QtWidgets.QPushButton("Add paths")
+        add_paths.clicked.connect(self.add_pasted)
+        add = QtWidgets.QPushButton("Browse...")
         remove = QtWidgets.QPushButton("Remove")
         up = QtWidgets.QPushButton("Up")
         down = QtWidgets.QPushButton("Down")
@@ -254,8 +275,12 @@ class CompDialog(QtWidgets.QDialog):
 
         left = QtWidgets.QVBoxLayout()
         left.addWidget(ui._label("Render layers  (top = foreground)", "title"))
-        left.addWidget(ui._label("One folder per render layer. Drop folders from the "
-                                 "Explorer here, or Add folders (Ctrl/Shift to pick several).", "hint"))
+        left.addWidget(ui._label("One folder per render layer: paste paths, drop folders "
+                                 "from the Explorer, or Browse.", "hint"))
+        paste_row = QtWidgets.QHBoxLayout()
+        paste_row.addWidget(self.paste, 1)
+        paste_row.addWidget(add_paths)
+        left.addLayout(paste_row)
         left.addWidget(self.layers)
         row = QtWidgets.QHBoxLayout()
         for b in (add, remove, up, down):
@@ -290,6 +315,17 @@ class CompDialog(QtWidgets.QDialog):
             if folders:
                 self.prefs.set_pref("comp_last_dir", os.path.dirname(folders[0].rstrip("/")))
             self.add_folders(folders)
+
+    def add_pasted(self):
+        self.add_folders(parse_paths(self.paste.toPlainText()))
+        self.paste.clear()
+
+    def keyPressEvent(self, event):
+        # Ctrl+V anywhere but the paste box adds the clipboard paths directly
+        if event.matches(QtGui.QKeySequence.Paste) and not self.paste.hasFocus():
+            self.add_folders(parse_paths(QtWidgets.QApplication.clipboard().text()))
+            return
+        super().keyPressEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
