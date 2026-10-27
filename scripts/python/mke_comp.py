@@ -275,6 +275,32 @@ def parse_paths(text):
 from hutil.Qt import QtCore, QtGui, QtWidgets  # noqa: E402  (UI only below)
 
 
+class LayerList(QtWidgets.QListWidget):
+    """Reorders by drag inside, takes folders/EXRs dropped from the Explorer
+    (InternalMove alone refuses outside drops)."""
+    dropped = QtCore.Signal(list)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.dropped.emit(parse_paths("\n".join(
+                u.toLocalFile() for u in event.mimeData().urls())))
+        else:
+            super().dropEvent(event)
+
+
 class CompDialog(QtWidgets.QDialog):
     """Render layer folders (top = foreground) + passes -> build()."""
 
@@ -289,9 +315,11 @@ class CompDialog(QtWidgets.QDialog):
         self.prefs = mke_project
         self.aovs = {}  # exr path -> AOV names
 
-        self.layers = QtWidgets.QListWidget()
+        self.layers = LayerList()
         self.layers.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        self.layers.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        self.layers.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
+        self.layers.setDefaultDropAction(QtCore.Qt.MoveAction)  # inside: reorder
+        self.layers.dropped.connect(self.add_folders)
         self.passes = QtWidgets.QListWidget()
         self.paste = QtWidgets.QPlainTextEdit()
         self.paste.setPlaceholderText("Paste folder paths here, one per line (\"Copy as path\" "
@@ -371,8 +399,8 @@ class CompDialog(QtWidgets.QDialog):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        self.add_folders([u.toLocalFile() for u in event.mimeData().urls()
-                          if os.path.isdir(u.toLocalFile())])
+        self.add_folders(parse_paths("\n".join(
+            u.toLocalFile() for u in event.mimeData().urls())))
 
     def add_folders(self, folders):
         known = set(self.paths())
