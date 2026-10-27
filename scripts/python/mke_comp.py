@@ -55,25 +55,45 @@ def read_aovs(file_node):
     return list(file_node.outputNames())
 
 
-def _shorten(names):
-    """Drop what all names share, cut on '_'. None if that isn't unique."""
+def _shorten(names, unique=True):
+    """Drop what all names share, cut on '_'. None if a name ends up empty
+    (or, with unique, if two names end up equal)."""
     if len(names) == 1:
         return names
     pre = os.path.commonprefix(names).rfind("_") + 1
     suf = os.path.commonprefix([n[::-1] for n in names]).rfind("_") + 1
     short = [n[pre:len(n) - suf].strip("_") for n in names]
-    return short if all(short) and len(set(short)) == len(short) else None
+    if not all(short) or (unique and len(set(short)) < len(short)):
+        return None
+    return short
+
+
+def _number_duplicates(names):
+    """rop_character twice -> rop_character, rop_character_2."""
+    seen = {}
+    out = []
+    for n in names:
+        seen[n] = seen.get(n, 0) + 1
+        out.append(n if seen[n] == 1 else "%s_%d" % (n, seen[n]))
+    return out
 
 
 def layer_labels(paths):
-    """Short unique layer names. Tries the folders+file name without versions
-    (.../withFX/shot_v0002 -> withFX), then the file names (shot_v0001 -> v0001)."""
+    """Short unique layer names. File names first, without what they share
+    (shot.usdrender_rop_character -> rop_character, re-renders numbered _2),
+    then the folders (.../withFX/shot_v0002 -> withFX), then the versions."""
     clean = lambda t: re.sub(r"[^A-Za-z0-9_]", "_", t)
     seqs = [sequence_path(p)[0] for p in paths]
     bases = [clean(re.sub(r"[._]?\$F\d.*$", "", os.path.basename(s))) for s in seqs]
     keys = [clean(re.sub(r"/v\d+(?=/|$)", "", os.path.dirname(s)) + "/" +
                   re.sub(r"_v\d+$", "", b)) for s, b in zip(seqs, bases)]
-    names = bases if len(bases) == 1 else _shorten(keys) or _shorten(bases) or bases
+    by_file = _shorten([re.sub(r"_v\d+$", "", b) for b in bases], unique=False)
+    if len(bases) == 1:
+        names = bases
+    elif by_file and len(set(by_file)) > 1:
+        names = _number_duplicates(by_file)
+    else:
+        names = _shorten(keys) or _shorten(bases) or bases
     return ["L" + n if n[:1].isdigit() else n for n in names]
 
 
@@ -98,8 +118,12 @@ def find_layers(root):
     return [p for _, p in sorted(latest.values(), key=lambda v: v[1])]
 
 
-def build_layer(net, path, label, passes=None):
-    """File COP + subtractive rebuild of one render layer. Returns its last node."""
+COLUMN = 7.0  # network units between layer columns
+
+
+def build_layer(net, path, label, passes=None, x=0.0):
+    """File COP + subtractive rebuild of one render layer, laid out in a column
+    at x. Returns (its last node, lowest y used)."""
     seq = sequence_path(path)[0]
     src = net.createNode("file", label)
     src.parm("filename").set(path.replace("\\", "/"))  # a frame that exists, $F4 breaks addaovs
@@ -110,6 +134,12 @@ def build_layer(net, path, label, passes=None):
     # a layer with none of the picked passes stays its beauty (residual only)
     passes = [p for p in (passes or light_passes(aovs)) if p in aovs]
     nodes = [src]
+    src.setPosition(hou.Vector2(x, 0))
+    y = [-1.5 - 0.22 * len(aovs)]  # the file tile grows with its outputs
+
+    def place(n, dx=0.0):
+        n.setPosition(hou.Vector2(x + dx, y[0]))
+        y[0] -= 1.2
 
     def blend(mode, bg, fg, fg_index, name):
         b = net.createNode("blend", "%s_%s" % (label, name))
@@ -118,29 +148,34 @@ def build_layer(net, path, label, passes=None):
         b.setInput(0, bg)
         b.setInput(1, fg, fg_index)
         nodes.append(b)
+        place(b)
         return b
 
     # residual = C - passes: whatever the passes don't cover (keeps comp == beauty)
     node = net.createNode("null", label + "_beauty")
     node.setInput(0, src, src.outputIndex("C"))
     nodes.append(node)
+    place(node)
     for p in passes:
         node = blend("subtract", node, src, src.outputIndex(p), "minus_" + p)
     node = grade(net, node, label + "_residual")
     node.setColor(hou.Color(0.4, 0.4, 0.4))
     nodes.append(node)
+    place(node)
 
     for p in passes:
         g = grade(net, src, "%s_%s" % (label, p), src.outputIndex(p))
         g.setColor(hou.Color(1, 0.8, 0.2))
         nodes.append(g)
+        g.setPosition(hou.Vector2(x + 3, y[0] + 0.6))  # beside its plus node
         node = blend("add", node, g, 0, "plus_" + p)
 
     box = net.createNetworkBox(label + "_box")
     box.setComment(label)
     for n in nodes:
         box.addItem(n)
-    return node
+    box.fitAroundContents()
+    return node, y[0]
 
 
 def build(paths, passes=None, parent=None, name=None):
@@ -156,27 +191,34 @@ def build(paths, passes=None, parent=None, name=None):
 
     node = None
     first = last = None
-    for path, label in zip(paths, layer_labels(paths)):
-        top = build_layer(net, path, label, passes)
-        if node is None:
-            node = top
-        else:
-            over = net.createNode("blend", "over_" + label)
-            over.parm("mode").set("over")
-            over.setInput(0, node)
-            over.setInput(1, top)
-            node = over
+    tops = []
+    for i, (path, label) in enumerate(zip(paths, layer_labels(paths))):
+        tops.append(build_layer(net, path, label, passes, i * COLUMN) + (label,))
         f1, f2 = sequence_path(path)[1:]
         if f1 is not None:
             first = f1 if first is None else min(first, f1)
             last = f2 if last is None else max(last, f2)
 
+    # over chain on one row under the columns, left (background) to right
+    row = min(t[1] for t in tops) - 1.5
+    for i, (top, _, label) in enumerate(tops):
+        if node is None:
+            node = top
+            continue
+        over = net.createNode("blend", "over_" + label)
+        over.parm("mode").set("over")
+        over.setInput(0, node)
+        over.setInput(1, top)
+        over.setPosition(hou.Vector2(i * COLUMN, row))
+        node = over
     out = net.createNode("null", "OUT")
     out.setInput(0, node)
     out.setDisplayFlag(True)
+    out.setPosition(node.position() + hou.Vector2(0, -1.5))
 
     rop = net.createNode("rop_image", "write_comp")
     rop.setInput(0, out)
+    rop.setPosition(out.position() + hou.Vector2(0, -1.5))
     rop.parm("copoutput").set(os.path.dirname(seq) + "/comp/" + name + "_comp.$F4.exr")
     if first is not None:
         rop.parm("trange").set(1)
@@ -184,9 +226,6 @@ def build(paths, passes=None, parent=None, name=None):
             rop.parm(parm).deleteAllKeyframes()
             rop.parm(parm).set(v)
 
-    net.layoutChildren()
-    for box in net.networkBoxes():
-        box.fitAroundContents()
     return net
 
 
