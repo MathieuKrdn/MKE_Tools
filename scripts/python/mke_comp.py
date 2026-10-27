@@ -107,9 +107,8 @@ def build_layer(net, path, label, passes=None):
     src.parm("filename").set(seq)
     if "C" not in aovs:
         raise hou.Error("No beauty (C) AOV in %s" % path)
+    # a layer with none of the picked passes stays its beauty (residual only)
     passes = [p for p in (passes or light_passes(aovs)) if p in aovs]
-    if not passes:
-        raise hou.Error("No light pass found in %s" % path)
     nodes = [src]
 
     def blend(mode, bg, fg, fg_index, name):
