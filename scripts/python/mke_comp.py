@@ -55,18 +55,47 @@ def read_aovs(file_node):
     return list(file_node.outputNames())
 
 
+def _shorten(names):
+    """Drop what all names share, cut on '_'. None if that isn't unique."""
+    if len(names) == 1:
+        return names
+    pre = os.path.commonprefix(names).rfind("_") + 1
+    suf = os.path.commonprefix([n[::-1] for n in names]).rfind("_") + 1
+    short = [n[pre:len(n) - suf].strip("_") for n in names]
+    return short if all(short) and len(set(short)) == len(short) else None
+
+
 def layer_labels(paths):
-    """Short layer names: file names minus what all the picked files share."""
-    names = [re.sub(r"[^A-Za-z0-9_]", "_", os.path.basename(
-        sequence_path(p)[0]).split(".")[0]) for p in paths]
-    if len(names) > 1:
-        # cut on '_' so 'shot_v0001'/'shot_v0002' give v0001/v0002, not 1/2
-        pre = os.path.commonprefix(names).rfind("_") + 1
-        suf = os.path.commonprefix([n[::-1] for n in names]).rfind("_") + 1
-        short = [n[pre:len(n) - suf].strip("_") for n in names]
-        if all(short) and len(set(short)) == len(short):
-            names = short
+    """Short unique layer names. Tries the folders+file name without versions
+    (.../withFX/shot_v0002 -> withFX), then the file names (shot_v0001 -> v0001)."""
+    clean = lambda t: re.sub(r"[^A-Za-z0-9_]", "_", t)
+    seqs = [sequence_path(p)[0] for p in paths]
+    bases = [clean(re.sub(r"[._]?\$F\d.*$", "", os.path.basename(s))) for s in seqs]
+    keys = [clean(re.sub(r"/v\d+(?=/|$)", "", os.path.dirname(s)) + "/" +
+                  re.sub(r"_v\d+$", "", b)) for s, b in zip(seqs, bases)]
+    names = bases if len(bases) == 1 else _shorten(keys) or _shorten(bases) or bases
     return ["L" + n if n[:1].isdigit() else n for n in names]
+
+
+def find_layers(root):
+    """Render layers under a folder: one EXR per sequence, latest vNNN folder only.
+    Skips comp outputs and backups."""
+    latest = {}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != "comp" and not d.startswith("_")]
+        folder = folder.replace("\\", "/")
+        seqs = {}
+        for f in sorted(files):
+            m = FRAME_RE.search(f)
+            if m:
+                seqs.setdefault(f[:m.start(1)], folder + "/" + f)
+        for head, path in seqs.items():
+            m = re.search(r"/v(\d+)$", folder)
+            key = (folder[:m.start()] if m else folder, re.sub(r"(_v\d+)?[._]*$", "", head))
+            version = int(m.group(1)) if m else 0
+            if key not in latest or version > latest[key][0]:
+                latest[key] = (version, path)
+    return [p for _, p in sorted(latest.values(), key=lambda v: v[1])]
 
 
 def build_layer(net, path, label, passes=None):
@@ -171,11 +200,25 @@ def grade(net, inp, label, out_index=0):
 
 def compFromRender():
     """MK Utils entry: pick the render layers, pick the passes, build the comp."""
-    picked_files = hou.ui.selectFile(
-        title="Render layers: one EXR per layer (any frame), background first",
-        pattern="*.exr", chooser_mode=hou.fileChooserMode.Read, multiple_select=True)
-    paths = [hou.text.expandString(p.strip())
-             for p in picked_files.split(";") if p.strip()]
+    mode = hou.ui.displayMessage(
+        "Build the comp from:", buttons=("Render folder", "EXR files", "Cancel"),
+        default_choice=0, close_choice=2, title="Copernicus Comp",
+        details="Render folder: every EXR sequence below it is a layer "
+                "(latest vNNN folder only, 'comp' and '_backup' folders skipped).")
+    if mode == 2:
+        return
+    if mode == 0:
+        root = hou.ui.selectFile(title="Render folder holding the layers",
+                                 file_type=hou.fileType.Directory)
+        paths = find_layers(hou.text.expandString(root)) if root else []
+        if root and not paths:
+            raise hou.Error("No EXR sequence under " + root)
+    else:
+        picked_files = hou.ui.selectFile(
+            title="Render layers: one EXR per layer (any frame)",
+            pattern="*.exr", chooser_mode=hou.fileChooserMode.Read, multiple_select=True)
+        paths = [hou.text.expandString(p.strip())
+                 for p in picked_files.split(";") if p.strip()]
     if not paths:
         return
     if len(paths) > 1:
