@@ -132,7 +132,7 @@ def build_layer(net, path, label, passes=None, x=0.0):
     if "C" not in aovs:
         raise hou.Error("No beauty (C) AOV in %s" % path)
     # a layer with none of the picked passes stays its beauty (residual only)
-    passes = [p for p in (passes or light_passes(aovs)) if p in aovs]
+    passes = [p for p in (light_passes(aovs) if passes is None else passes) if p in aovs]
     nodes = [src]
     src.setPosition(hou.Vector2(x, 0))
     y = [-1.5 - 0.22 * len(aovs)]  # the file tile grows with its outputs
@@ -180,7 +180,8 @@ def build_layer(net, path, label, passes=None, x=0.0):
 
 def build(paths, passes=None, parent=None, name=None):
     """Create the copnet. paths: one EXR (any frame) per render layer, bottom first.
-    passes=None -> light_passes() per layer."""
+    passes: None -> light_passes() per layer, a list for every layer, or
+    {path: list} when the layers don't share the same AOVs."""
     if isinstance(paths, str):
         paths = [paths]
     seq = sequence_path(paths[0])[0]
@@ -193,7 +194,8 @@ def build(paths, passes=None, parent=None, name=None):
     first = last = None
     tops = []
     for i, (path, label) in enumerate(zip(paths, layer_labels(paths))):
-        tops.append(build_layer(net, path, label, passes, i * COLUMN) + (label,))
+        layer_passes = passes.get(path) if isinstance(passes, dict) else passes
+        tops.append(build_layer(net, path, label, layer_passes, i * COLUMN) + (label,))
         f1, f2 = sequence_path(path)[1:]
         if f1 is not None:
             first = f1 if first is None else min(first, f1)
@@ -314,13 +316,16 @@ class CompDialog(QtWidgets.QDialog):
         self.resize(820, 480)
         self.prefs = mke_project
         self.aovs = {}  # exr path -> AOV names
+        self.picked = {}  # exr path -> passes ticked for that layer
 
         self.layers = LayerList()
         self.layers.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.layers.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
         self.layers.setDefaultDropAction(QtCore.Qt.MoveAction)  # inside: reorder
         self.layers.dropped.connect(self.add_folders)
+        self.layers.itemSelectionChanged.connect(self.show_passes)
         self.passes = QtWidgets.QListWidget()
+        self.passes.itemChanged.connect(self.pass_toggled)
         self.paste = QtWidgets.QPlainTextEdit()
         self.paste.setPlaceholderText("Paste folder paths here, one per line (\"Copy as path\" "
                                       "quotes are fine), then Add paths. Ctrl+V on the list works too.")
@@ -355,8 +360,9 @@ class CompDialog(QtWidgets.QDialog):
         left.addLayout(row)
         right = QtWidgets.QVBoxLayout()
         right.addWidget(ui._label("Passes", "title"))
-        right.addWidget(ui._label("Added back on each layer's beauty. Don't tick overlapping "
-                                  "passes (combined X = direct X + indirect X).", "hint"))
+        right.addWidget(ui._label("Per layer: shows the selected layers' AOVs (all layers when "
+                                  "none is selected); ticks apply to those layers only. "
+                                  "Light passes are ticked by default.", "hint"))
         right.addWidget(self.passes)
         cols = QtWidgets.QHBoxLayout()
         cols.addLayout(left, 3)
@@ -435,23 +441,57 @@ class CompDialog(QtWidgets.QDialog):
         return [self.layers.item(i).data(QtCore.Qt.UserRole) for i in range(self.layers.count())]
 
     def refresh(self):
-        """Layer labels and the pass list (union of every layer's AOVs)."""
+        """Read new layers' AOVs (light passes ticked), relabel, redraw passes."""
         paths = self.paths()
-        for i, label in enumerate(layer_labels(paths) if paths else []):
-            if paths[i] not in self.aovs:
-                self.aovs[paths[i]] = layer_aovs(paths[i])
-            self.layers.item(i).setText("%s    (%d AOVs)" % (label, len(self.aovs[paths[i]])))
-        checked = {self.passes.item(i).text(): self.passes.item(i).checkState()
-                   for i in range(self.passes.count())}
-        names = sorted({a for p in paths for a in self.aovs[p]
+        for p in paths:
+            if p not in self.aovs:
+                self.aovs[p] = layer_aovs(p)
+                self.picked[p] = set(light_passes(self.aovs[p]))
+        self.labels = dict(zip(paths, layer_labels(paths))) if paths else {}
+        self.update_layer_texts()
+        self.show_passes()
+
+    def update_layer_texts(self):
+        for i, p in enumerate(self.paths()):
+            self.layers.item(i).setText("%s    (%d passes / %d AOVs)" % (
+                self.labels[p], len(self.picked[p]), len(self.aovs[p])))
+
+    def target_paths(self):
+        """Layers the pass list edits: the selected ones, else all."""
+        sel = [i.data(QtCore.Qt.UserRole) for i in self.layers.selectedItems()]
+        return sel or self.paths()
+
+    def show_passes(self):
+        """AOVs of the target layers; partial tick when only some of them use it."""
+        targets = self.target_paths()
+        names = sorted({a for p in targets for a in self.aovs.get(p, ())
                         if a != "C" and not a.startswith("Crypto")})
-        default = set(light_passes(names))
+        self.passes.blockSignals(True)
         self.passes.clear()
         for a in names:
-            item = QtWidgets.QListWidgetItem(a)
+            having = [p for p in targets if a in self.aovs[p]]
+            on = sum(a in self.picked[p] for p in having)
+            text = a if len(having) == len(targets) else "%s   (%d/%d layers)" % (
+                a, len(having), len(targets))
+            item = QtWidgets.QListWidgetItem(text)
+            item.setData(QtCore.Qt.UserRole, a)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-            item.setCheckState(checked.get(a, QtCore.Qt.Checked if a in default else QtCore.Qt.Unchecked))
+            item.setCheckState(QtCore.Qt.Unchecked if not on else QtCore.Qt.Checked
+                               if on == len(having) else QtCore.Qt.PartiallyChecked)
             self.passes.addItem(item)
+        self.passes.blockSignals(False)
+
+    def pass_toggled(self, item):
+        a = item.data(QtCore.Qt.UserRole)
+        on = item.checkState() != QtCore.Qt.Unchecked  # partial click -> on for all
+        for p in self.target_paths():
+            if a in self.aovs[p]:
+                (self.picked[p].add if on else self.picked[p].discard)(a)
+        if item.checkState() == QtCore.Qt.PartiallyChecked:
+            self.passes.blockSignals(True)
+            item.setCheckState(QtCore.Qt.Checked)
+            self.passes.blockSignals(False)
+        self.update_layer_texts()
 
     # ------------------------------------------------------------ build
     def build(self):
@@ -459,11 +499,9 @@ class CompDialog(QtWidgets.QDialog):
         if not paths:
             self.error.setText("Add at least one render layer folder.")
             return
-        picked = [self.passes.item(i).text() for i in range(self.passes.count())
-                  if self.passes.item(i).checkState() == QtCore.Qt.Checked]
         try:
-            # build() stacks bottom first; no pass ticked -> beauty only
-            net = build(list(reversed(paths)), picked or ["_none_"])
+            # build() stacks bottom first; a layer with no pass ticked -> its beauty only
+            net = build(list(reversed(paths)), {p: sorted(self.picked[p]) for p in paths})
         except hou.Error as e:
             self.error.setText(e.instanceMessage())
             return
