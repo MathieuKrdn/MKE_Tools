@@ -197,63 +197,177 @@ def grade(net, inp, label, out_index=0):
     return g
 
 
-def compFromRender():
-    """MK Utils entry: pick the render layers, pick the passes, build the comp."""
-    mode = hou.ui.displayMessage(
-        "Build the comp from:", buttons=("Render folder", "EXR files", "Cancel"),
-        default_choice=0, close_choice=2, title="Copernicus Comp",
-        details="Render folder: every EXR sequence below it is a layer "
-                "(latest vNNN folder only, 'comp' and '_backup' folders skipped).")
-    if mode == 2:
-        return
-    if mode == 0:
-        root = hou.ui.selectFile(title="Render folder holding the layers",
-                                 file_type=hou.fileType.Directory)
-        paths = find_layers(hou.text.expandString(root)) if root else []
-        if root and not paths:
-            raise hou.Error("No EXR sequence under " + root)
-    else:
-        picked_files = hou.ui.selectFile(
-            title="Render layers: one EXR per layer (any frame)",
-            pattern="*.exr", chooser_mode=hou.fileChooserMode.Read, multiple_select=True)
-        paths = [hou.text.expandString(p.strip())
-                 for p in picked_files.split(";") if p.strip()]
-    if not paths:
-        return
-    if len(paths) > 1:
-        labels = layer_labels(paths)
-        btn, text = hou.ui.readInput(
-            "Stacking order, background first (edit to reorder):",
-            buttons=("OK", "Cancel"), title="Copernicus Comp",
-            initial_contents=", ".join(labels))
-        if btn:
-            return
-        order = [t.strip() for t in text.split(",") if t.strip()]
-        if sorted(order) != sorted(labels):
-            raise hou.Error("Order must list these layers once each: " + ", ".join(labels))
-        paths = [paths[labels.index(t)] for t in order]
+def layer_aovs(path):
+    """AOV names of one EXR (reads the header through a temporary file COP)."""
     probe = hou.node("/obj").createNode("copnet")
     try:
-        aovs = set()
-        for p in paths:
-            f = probe.createNode("file")
-            f.parm("filename").set(p)
-            aovs.update(read_aovs(f))
+        f = probe.createNode("file")
+        f.parm("filename").set(path)
+        return read_aovs(f)
     finally:
         probe.destroy()
-    aovs = sorted(a for a in aovs if a != "C" and not a.startswith("Crypto"))
-    default = light_passes(aovs)
-    picked = hou.ui.selectFromList(
-        aovs, default_choices=[aovs.index(a) for a in default],
-        title="Copernicus Comp", column_header="Passes",
-        message="Passes added back on each layer's beauty (C).\n"
-                "Pick passes that don't overlap (combined X = direct X + indirect X);\n"
-                "what they don't cover goes to the layer's 'residual'.")
-    if not picked:
-        return
-    net = build(paths, [aovs[i] for i in picked])
-    net.setCurrent(True, clear_all_selected=True)
-    pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
-    if pane:
-        pane.setPwd(net)
-    hou.ui.setStatusMessage("Comp built in %s" % net.path())
+
+
+def compFromRender():
+    """MK Utils entry: the comp window."""
+    global _dialog
+    _dialog = CompDialog(hou.qt.mainWindow())
+    _dialog.show()
+    return _dialog
+
+
+_dialog = None
+
+from hutil.Qt import QtCore, QtWidgets  # noqa: E402  (UI only below)
+
+
+class CompDialog(QtWidgets.QDialog):
+    """Render layer folders (top = foreground) + passes -> build()."""
+
+    def __init__(self, parent=None):
+        import mke_project
+        import projectSetup as ui
+        super().__init__(parent)
+        self.setWindowTitle("Copernicus Comp")
+        self.setStyleSheet(ui.STYLE)
+        self.setAcceptDrops(True)
+        self.resize(820, 480)
+        self.prefs = mke_project
+        self.aovs = {}  # exr path -> AOV names
+
+        self.layers = QtWidgets.QListWidget()
+        self.layers.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.layers.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        self.passes = QtWidgets.QListWidget()
+        add = QtWidgets.QPushButton("Add folders...")
+        remove = QtWidgets.QPushButton("Remove")
+        up = QtWidgets.QPushButton("Up")
+        down = QtWidgets.QPushButton("Down")
+        self.error = ui._label("", "warning")
+        build_btn = QtWidgets.QPushButton("Build comp")
+        build_btn.setObjectName("primary")
+        add.clicked.connect(self.browse)
+        remove.clicked.connect(self.remove_selected)
+        up.clicked.connect(lambda: self.move(-1))
+        down.clicked.connect(lambda: self.move(1))
+        build_btn.clicked.connect(self.build)
+
+        left = QtWidgets.QVBoxLayout()
+        left.addWidget(ui._label("Render layers  (top = foreground)", "title"))
+        left.addWidget(ui._label("One folder per render layer. Drop folders from the "
+                                 "Explorer here, or Add folders (Ctrl/Shift to pick several).", "hint"))
+        left.addWidget(self.layers)
+        row = QtWidgets.QHBoxLayout()
+        for b in (add, remove, up, down):
+            row.addWidget(b)
+        left.addLayout(row)
+        right = QtWidgets.QVBoxLayout()
+        right.addWidget(ui._label("Passes", "title"))
+        right.addWidget(ui._label("Added back on each layer's beauty. Don't tick overlapping "
+                                  "passes (combined X = direct X + indirect X).", "hint"))
+        right.addWidget(self.passes)
+        cols = QtWidgets.QHBoxLayout()
+        cols.addLayout(left, 3)
+        cols.addLayout(right, 2)
+        main = QtWidgets.QVBoxLayout(self)
+        main.addLayout(cols)
+        bottom = QtWidgets.QHBoxLayout()
+        bottom.addWidget(self.error, 1)
+        bottom.addWidget(build_btn)
+        main.addLayout(bottom)
+
+    # ------------------------------------------------------------ layers
+    def browse(self):
+        start = self.prefs.get_pref("comp_last_dir") or hou.text.expandString("$JOB")
+        dlg = QtWidgets.QFileDialog(self, "Render layer folders (Ctrl/Shift for several)", start)
+        dlg.setFileMode(QtWidgets.QFileDialog.Directory)
+        dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)  # the native one picks a single folder
+        dlg.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
+        for view in dlg.findChildren(QtWidgets.QAbstractItemView):
+            view.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        if dlg.exec_():
+            folders = dlg.selectedFiles()
+            if folders:
+                self.prefs.set_pref("comp_last_dir", os.path.dirname(folders[0].rstrip("/")))
+            self.add_folders(folders)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        self.add_folders([u.toLocalFile() for u in event.mimeData().urls()
+                          if os.path.isdir(u.toLocalFile())])
+
+    def add_folders(self, folders):
+        known = set(self.paths())
+        empty = []
+        for folder in folders:
+            found = find_layers(folder)
+            if not found:
+                empty.append(os.path.basename(folder.rstrip("/\\")))
+            for p in found:
+                if p in known:
+                    continue
+                known.add(p)
+                item = QtWidgets.QListWidgetItem()
+                item.setData(QtCore.Qt.UserRole, p)
+                item.setToolTip(p)
+                self.layers.insertItem(0, item)  # new layers land on top
+        self.error.setText("No EXR in: " + ", ".join(empty) if empty else "")
+        self.refresh()
+
+    def remove_selected(self):
+        for item in self.layers.selectedItems():
+            self.layers.takeItem(self.layers.row(item))
+        self.refresh()
+
+    def move(self, step):
+        row = self.layers.currentRow()
+        if row >= 0 and 0 <= row + step < self.layers.count():
+            self.layers.insertItem(row + step, self.layers.takeItem(row))
+            self.layers.setCurrentRow(row + step)
+
+    def paths(self):
+        return [self.layers.item(i).data(QtCore.Qt.UserRole) for i in range(self.layers.count())]
+
+    def refresh(self):
+        """Layer labels and the pass list (union of every layer's AOVs)."""
+        paths = self.paths()
+        for i, label in enumerate(layer_labels(paths) if paths else []):
+            if paths[i] not in self.aovs:
+                self.aovs[paths[i]] = layer_aovs(paths[i])
+            self.layers.item(i).setText("%s    (%d AOVs)" % (label, len(self.aovs[paths[i]])))
+        checked = {self.passes.item(i).text(): self.passes.item(i).checkState()
+                   for i in range(self.passes.count())}
+        names = sorted({a for p in paths for a in self.aovs[p]
+                        if a != "C" and not a.startswith("Crypto")})
+        default = set(light_passes(names))
+        self.passes.clear()
+        for a in names:
+            item = QtWidgets.QListWidgetItem(a)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(checked.get(a, QtCore.Qt.Checked if a in default else QtCore.Qt.Unchecked))
+            self.passes.addItem(item)
+
+    # ------------------------------------------------------------ build
+    def build(self):
+        paths = self.paths()
+        if not paths:
+            self.error.setText("Add at least one render layer folder.")
+            return
+        picked = [self.passes.item(i).text() for i in range(self.passes.count())
+                  if self.passes.item(i).checkState() == QtCore.Qt.Checked]
+        try:
+            # build() stacks bottom first; no pass ticked -> beauty only
+            net = build(list(reversed(paths)), picked or ["_none_"])
+        except hou.Error as e:
+            self.error.setText(e.instanceMessage())
+            return
+        net.setCurrent(True, clear_all_selected=True)
+        if hou.isUIAvailable():
+            pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            if pane:
+                pane.setPwd(net)
+            hou.ui.setStatusMessage("Comp built in %s" % net.path())
+        self.close()
