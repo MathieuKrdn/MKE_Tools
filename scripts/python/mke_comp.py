@@ -118,124 +118,308 @@ def find_layers(root):
     return [p for _, p in sorted(latest.values(), key=lambda v: v[1])]
 
 
-COLUMN = 7.0  # network units between layer columns
+# ---------------------------------------------------------------- layer types
+# keyword at the start of a name token -> type; colour shared by the window and the network
+TYPE_KEYS = (("FX", ("fx", "pyro", "flip", "smoke", "wave", "splash")),
+             ("CHAR", ("char", "hero", "crowd")),
+             ("CAR", ("car", "vehicle")),
+             ("UI", ("ui", "hud", "text", "title")),
+             ("BG", ("bg", "background", "env", "set", "sky")))
+TYPES = ("BG", "CAR", "CHAR", "FX", "UI", "OTHER")
+TYPE_COLORS = {"BG": "#6f9be0", "CAR": "#4fc1b3", "CHAR": "#f0a24a",
+               "FX": "#b392f0", "UI": "#b5b5b5", "OTHER": "#8c96a8"}
 
 
-def build_layer(net, path, label, passes=None, x=0.0):
-    """File COP + subtractive rebuild of one render layer, laid out in a column
-    at x. Returns (its last node, lowest y used)."""
+def layer_type(label):
+    tokens = [t for t in label.lower().split("_") if t]
+    for kind, keys in TYPE_KEYS:
+        if any(t.startswith(k) for t in tokens for k in keys):
+            return kind
+    return "OTHER"
+
+
+def hou_color(kind):
+    h = TYPE_COLORS.get(kind, TYPE_COLORS["OTHER"]).lstrip("#")
+    return hou.Color(*(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)))
+
+
+def frame_info(path):
+    """(first, last, missing frames) of the sequence path belongs to."""
+    seq, first, last = sequence_path(path)
+    if first is None:
+        return None, None, 0
+    m = FRAME_RE.search(path.replace("\\", "/"))
+    head = os.path.basename(path.replace("\\", "/")[:m.start(1)])
+    count = sum(1 for f in os.listdir(os.path.dirname(path))
+                if f.startswith(head) and FRAME_RE.search(f)
+                and len(FRAME_RE.search(f).group(1)) == len(m.group(1)))
+    return first, last, (last - first + 1) - count
+
+
+# ---------------------------------------------------------------- one layer = one subnet
+GRID_X, GRID_Y = 3.2, 1.3  # network units between columns / rows inside a layer
+
+
+def knob_values(sub):
+    """Spare parm values of a layer node, to carry over a rebuild."""
+    return {p.name(): p.eval() for p in sub.spareParms()
+            if p.parmTemplate().type() in (hou.parmTemplateType.Float,
+                                           hou.parmTemplateType.Toggle)}
+
+
+def _knob_templates(passes):
+    layer = hou.FolderParmTemplate("layer_f", "Layer", folder_type=hou.folderType.Simple)
+    layer.addParmTemplate(hou.FloatParmTemplate("exposure", "Exposure (stops)", 1, (0,),
+                                                min=-5, max=5))
+    layer.addParmTemplate(hou.FloatParmTemplate("opacity", "Opacity", 1, (1,), min=0, max=1,
+                                                min_is_strict=True, max_is_strict=True))
+    layer.addParmTemplate(hou.FloatParmTemplate("residual", "Residual Gain", 1, (1,), min=0, max=2,
+                                                help="What the passes don't cover (beauty - passes)."))
+    folder = hou.FolderParmTemplate("passes_f", "Passes", folder_type=hou.folderType.Simple)
+    if not passes:
+        folder.addParmTemplate(hou.LabelParmTemplate("nopass", "Passes", ("Beauty only",)))
+    for p in passes:
+        folder.addParmTemplate(hou.FloatParmTemplate("gain_" + p, p, 1, (1,), min=0, max=2,
+                                                     join_with_next=True))
+        folder.addParmTemplate(hou.FloatParmTemplate("tint_" + p, "Tint", 3, (1, 1, 1),
+                                                     look=hou.parmLook.ColorSquare,
+                                                     naming_scheme=hou.parmNamingScheme.RGBA,
+                                                     join_with_next=True))
+        folder.addParmTemplate(hou.ToggleParmTemplate("solo_" + p, "Solo", join_with_next=True))
+        folder.addParmTemplate(hou.ToggleParmTemplate("mute_" + p, "Mute"))
+    source = hou.FolderParmTemplate("source_f", "Source", folder_type=hou.folderType.Simple)
+    source.addParmTemplate(hou.StringParmTemplate("source", "Render (info, use Swap)", 1,
+                                                  string_type=hou.stringParmType.FileReference))
+    for name, label, func in (("reload", "Reload AOVs", "on_reload"),
+                              ("swap", "Swap to New Version...", "on_swap"),
+                              ("reset", "Reset Gains", "on_reset")):
+        source.addParmTemplate(hou.ButtonParmTemplate(
+            name, label, join_with_next=name != "reset",
+            script_callback="import mke_comp; mke_comp.%s(kwargs)" % func,
+            script_callback_language=hou.scriptLanguage.Python))
+    return layer, folder, source
+
+
+def populate_layer(sub, path, passes=None, values=None):
+    """(Re)build a layer subnet from one EXR (any frame): file on top, residual
+    column on the left, one column per pass, the sum along the bottom, then
+    layer_out (exposure, opacity). Knobs live on the subnet. Returns the passes."""
+    for c in sub.children():
+        if c.type().name() not in ("input", "output"):
+            c.destroy()
+    path = path.replace("\\", "/")
     seq = sequence_path(path)[0]
-    src = net.createNode("file", label)
-    src.parm("filename").set(path.replace("\\", "/"))  # a frame that exists, $F4 breaks addaovs
+    src = sub.createNode("file", "render")
+    src.parm("filename").set(path)  # a frame that exists, $F4 breaks addaovs
     aovs = read_aovs(src)
     src.parm("filename").set(seq)
     if "C" not in aovs:
         raise hou.Error("No beauty (C) AOV in %s" % path)
-    # a layer with none of the picked passes stays its beauty (residual only)
     passes = [p for p in (light_passes(aovs) if passes is None else passes) if p in aovs]
-    nodes = [src]
-    src.setPosition(hou.Vector2(x, 0))
-    y = [-1.5 - 0.22 * len(aovs)]  # the file tile grows with its outputs
 
-    def place(n, dx=0.0):
-        n.setPosition(hou.Vector2(x + dx, y[0]))
-        y[0] -= 1.2
+    group = sub.parmTemplateGroup()
+    for name in ("layer_f", "passes_f", "source_f"):
+        if group.find(name):
+            group.remove(name)
+    for t in _knob_templates(passes):
+        group.append(t)
+    sub.setParmTemplateGroup(group)
+    sub.parm("source").set(seq)
+    for name, v in (values or {}).items():
+        parm = sub.parm(name)
+        if parm is not None:
+            parm.set(v)
+    sub.setUserData("mke_comp_path", path)
+    sub.setUserData("mke_comp_passes", ",".join(passes))
 
-    def blend(mode, bg, fg, fg_index, name):
-        b = net.createNode("blend", "%s_%s" % (label, name))
+    solos = " + ".join('ch("../solo_%s")' % p for p in passes) or "0"
+    top = -0.22 * len(aovs) - 1.6  # the file tile grows with its outputs
+    src.setPosition(hou.Vector2(0, 0))
+
+    def at(node, col, row):
+        node.setPosition(hou.Vector2(col * GRID_X, top - row * GRID_Y))
+        return node
+
+    def blend(mode, bg, fg, fg_index, name, col, row):
+        b = at(sub.createNode("blend", name), col, row)
         b.parm("mode").set(mode)
         b.parm("scopergba").set(7)  # rgb only, alpha stays the beauty's
         b.setInput(0, bg)
         b.setInput(1, fg, fg_index)
-        nodes.append(b)
-        place(b)
         return b
 
-    # residual = C - passes: whatever the passes don't cover (keeps comp == beauty)
-    node = net.createNode("null", label + "_beauty")
+    node = at(sub.createNode("null", "beauty"), 0, 0)
     node.setInput(0, src, src.outputIndex("C"))
-    nodes.append(node)
-    place(node)
-    for p in passes:
-        node = blend("subtract", node, src, src.outputIndex(p), "minus_" + p)
-    node = grade(net, node, label + "_residual")
-    node.setColor(hou.Color(0.4, 0.4, 0.4))
-    nodes.append(node)
-    place(node)
+    for i, p in enumerate(passes):
+        node = blend("subtract", node, src, src.outputIndex(p), "minus_" + p, 0, i + 1)
+    chain = node
+    node = at(sub.createNode("bright", "residual"), 0, len(passes) + 1)
+    node.setInput(0, chain)
+    node.parm("bright").setExpression('ch("../residual") * ((%s) == 0)' % solos)
+    node.setColor(hou.Color(0.45, 0.45, 0.45))
 
-    for p in passes:
-        g = grade(net, src, "%s_%s" % (label, p), src.outputIndex(p))
-        g.setColor(hou.Color(1, 0.8, 0.2))
-        nodes.append(g)
-        g.setPosition(hou.Vector2(x + 3, y[0] + 0.6))  # beside its plus node
-        node = blend("add", node, g, 0, "plus_" + p)
+    row = len(passes) + 2
+    for i, p in enumerate(passes):
+        g = at(sub.createNode("bright", p), i + 1, 0)
+        g.setInput(0, src, src.outputIndex(p))
+        g.parm("bright").setExpression(
+            'ch("../gain_{0}") * (1 - ch("../mute_{0}")) * (ch("../solo_{0}") || (({1}) == 0))'
+            .format(p, solos))
+        for c in "rgb":
+            g.parm("brighttint" + c).setExpression('ch("../tint_%s%s")' % (p, c))
+        g.setColor(hou.Color(0.85, 0.65, 0.25))
+        node = blend("add", node, g, 0, "plus_" + p, i + 1, row)
 
-    box = net.createNetworkBox(label + "_box")
-    box.setComment(label)
-    for n in nodes:
-        box.addItem(n)
-    box.fitAroundContents()
-    return node, y[0]
+    out = at(sub.createNode("bright", "layer_out"), len(passes) + 1, row)
+    out.setInput(0, node)
+    out.parm("scopergba").set(15)  # opacity scales rgba (premultiplied), exposure only rgb via tint
+    out.parm("bright").setExpression('ch("../opacity")')
+    for c in "rgb":
+        out.parm("brighttint" + c).setExpression('pow(2, ch("../exposure"))')
+    out.setColor(hou.Color(0.9, 0.53, 0.16))
+    sub.node("outputs").setInput(0, out)
+    at(sub.node("outputs"), len(passes) + 1, row + 1)
+    sub.node("inputs").setPosition(hou.Vector2(-GRID_X, 0))
+    return passes
 
 
-def build(paths, passes=None, parent=None, name=None):
-    """Create the copnet. paths: one EXR (any frame) per render layer, bottom first.
-    passes: None -> light_passes() per layer, a list for every layer, or
-    {path: list} when the layers don't share the same AOVs."""
+# ---------------------------------------------------------------- the whole comp
+LAYER_DY = 1.6  # network units between layer nodes at the top level
+
+
+def read_comp(net):
+    """Layers of a comp this tool built, top (foreground) first:
+    [{label, path, passes, type, values}]."""
+    subs = [c for c in net.children() if c.userData("mke_comp_path")]
+    subs.sort(key=lambda s: -s.position()[1])
+    return [{"label": s.name(), "path": s.userData("mke_comp_path"),
+             "passes": [p for p in (s.userData("mke_comp_passes") or "").split(",") if p],
+             "type": s.userData("mke_comp_type") or layer_type(s.name()),
+             "values": knob_values(s)} for s in subs]
+
+
+def default_output(paths, name):
+    return os.path.dirname(sequence_path(paths[-1])[0]) + "/comp/" + name + "_comp.$F4.exr"
+
+
+def build(paths, passes=None, parent=None, name=None, output=None, types=None,
+          values=None, replace=False):
+    """Create the comp copnet. paths: one EXR (any frame) per render layer,
+    BOTTOM first. passes: None -> light_passes() per layer, a list for every
+    layer, or {path: list}. types: {path: 'BG'|...}. values: {label: knob values}
+    restored after the build. replace: rebuild an existing comp of that name,
+    keeping the knob values of layers with the same name."""
     if isinstance(paths, str):
         paths = [paths]
+    labels = layer_labels(paths)
     seq = sequence_path(paths[0])[0]
-    name = name or re.sub(r"[^A-Za-z0-9_]", "_",
-                          os.path.basename(seq).split(".")[0])
+    name = name or re.sub(r"[^A-Za-z0-9_]", "_", os.path.basename(seq).split(".")[0])
     parent = parent or hou.node("/img") or hou.node("/obj")
+    old = parent.node("comp_" + name)
+    if old is not None:
+        if not replace:
+            raise hou.Error("%s already exists" % old.path())
+        kept = {l["label"]: l["values"] for l in read_comp(old)}
+        kept.update(values or {})
+        values = kept
+        pos = old.position()
+        old.destroy()
     net = parent.createNode("copnet", "comp_" + name)
+    if old is not None:
+        net.setPosition(pos)
 
+    n = len(paths)
     node = None
     first = last = None
-    tops = []
-    for i, (path, label) in enumerate(zip(paths, layer_labels(paths))):
+    for i, (path, label) in enumerate(zip(paths, labels)):
+        y = -(n - 1 - i) * LAYER_DY  # foreground on top
+        sub = net.createNode("subnet", label)
+        sub.setPosition(hou.Vector2(0, y))
+        kind = (types or {}).get(path) or layer_type(label)
+        sub.setUserData("mke_comp_type", kind)
+        sub.setColor(hou_color(kind))
         layer_passes = passes.get(path) if isinstance(passes, dict) else passes
-        tops.append(build_layer(net, path, label, layer_passes, i * COLUMN) + (label,))
+        populate_layer(sub, path, layer_passes, (values or {}).get(label))
+        if node is None:
+            node = sub
+        else:
+            over = net.createNode("blend", "over_" + label)
+            over.parm("mode").set("over")
+            over.setInput(0, node)
+            over.setInput(1, sub)
+            over.setPosition(hou.Vector2(4, y))
+            node = over
         f1, f2 = sequence_path(path)[1:]
         if f1 is not None:
             first = f1 if first is None else min(first, f1)
             last = f2 if last is None else max(last, f2)
 
-    # over chain on one row under the columns, left (background) to right
-    row = min(t[1] for t in tops) - 1.5
-    for i, (top, _, label) in enumerate(tops):
-        if node is None:
-            node = top
-            continue
-        over = net.createNode("blend", "over_" + label)
-        over.parm("mode").set("over")
-        over.setInput(0, node)
-        over.setInput(1, top)
-        over.setPosition(hou.Vector2(i * COLUMN, row))
-        node = over
+    grade_node = net.createNode("bright", "final_grade")
+    grade_node.setInput(0, node)
+    grade_node.setPosition(hou.Vector2(8, 0))
     out = net.createNode("null", "OUT")
-    out.setInput(0, node)
+    out.setInput(0, grade_node)
     out.setDisplayFlag(True)
-    out.setPosition(node.position() + hou.Vector2(0, -1.5))
-
+    out.setColor(hou.Color(0.9, 0.53, 0.16))
+    out.setPosition(hou.Vector2(8, -LAYER_DY))
     rop = net.createNode("rop_image", "write_comp")
     rop.setInput(0, out)
-    rop.setPosition(out.position() + hou.Vector2(0, -1.5))
-    rop.parm("copoutput").set(os.path.dirname(seq) + "/comp/" + name + "_comp.$F4.exr")
+    rop.setPosition(hou.Vector2(8, -2 * LAYER_DY))
+    rop.parm("copoutput").set(output or default_output(paths, name))
+    rop.parm("size1").set("float16")  # EXR half float
     if first is not None:
         rop.parm("trange").set(1)
         for parm, v in (("f1", first), ("f2", last), ("f3", 1)):
             rop.parm(parm).deleteAllKeyframes()
             rop.parm(parm).set(v)
-
+    net.setUserData("mke_comp", name)
     return net
 
 
-def grade(net, inp, label, out_index=0):
-    """Per-pass knob: bright = gain (0 mutes, -1 subtracts twice), tint = color."""
-    g = net.createNode("bright", label)
-    g.setInput(0, inp, out_index)
-    return g
+# ---------------------------------------------------------------- buttons on a layer node
+def _rebuild(sub, path, passes):
+    keep = knob_values(sub)
+    populate_layer(sub, path, passes, keep)
+
+
+def on_reload(kwargs):
+    sub = kwargs["node"]
+    passes = [p for p in (sub.userData("mke_comp_passes") or "").split(",") if p]
+    _rebuild(sub, sub.userData("mke_comp_path"), passes)
+
+
+def on_reset(kwargs):
+    for p in kwargs["node"].spareParms():
+        if p.name() != "source":
+            p.revertToDefaults()
+
+
+def on_swap(kwargs):
+    sub = kwargs["node"]
+    old = sub.userData("mke_comp_path")
+    start = os.path.dirname(os.path.dirname(old))
+    picked = hou.ui.selectFile(start_directory=start + "/", title="New version: folder or EXR of this layer",
+                               chooser_mode=hou.fileChooserMode.Read)
+    if not picked:
+        return
+    picked = parse_paths(picked)[0]
+    found = [picked] if picked.lower().endswith(".exr") else find_layers(picked)
+    if not found:
+        hou.ui.displayMessage("No EXR in " + picked, severity=hou.severityType.Warning)
+        return
+    if len(found) > 1:
+        sel = hou.ui.selectFromList([os.path.basename(f) for f in found], exclusive=True,
+                                    title="Which sequence is this layer?")
+        if not sel:
+            return
+        found = [found[sel[0]]]
+    passes = [p for p in (sub.userData("mke_comp_passes") or "").split(",") if p]
+    _rebuild(sub, found[0], passes)
+    rop = sub.parent().node("write_comp")
+    f1, f2 = sequence_path(found[0])[1:]
+    if rop is not None and f1 is not None:
+        rop.parm("f1").set(min(rop.evalParm("f1"), f1))
+        rop.parm("f2").set(max(rop.evalParm("f2"), f2))
 
 
 def layer_aovs(path):
@@ -276,11 +460,59 @@ def parse_paths(text):
 
 from hutil.Qt import QtCore, QtGui, QtWidgets  # noqa: E402  (UI only below)
 
+QSS = """
+QDialog { background: #262626; color: #dcdcdc; }
+QFrame#bar { background: #1e1e1e; border: 0; }
+QLabel { color: #dcdcdc; }
+QLabel#title { font-size: 11pt; font-weight: bold; }
+QLabel#muted { color: #9a9a9a; }
+QLabel#section { color: #a8a8a8; font-size: 8pt; font-weight: bold; letter-spacing: 1px; }
+QLabel#mono { color: #8f8f8f; font-family: Consolas, monospace; font-size: 8pt; }
+QLabel#warn { color: #f0a24a; }
+QLabel#drop { color: #9a9a9a; border: 1px dashed #555; border-radius: 4px; padding: 12px; }
+QLineEdit, QPlainTextEdit, QComboBox { background: #333; border: 1px solid #4a4a4a; border-radius: 3px;
+    color: #e6e6e6; padding: 4px 6px; }
+QPushButton { background: #333; border: 1px solid #4a4a4a; border-radius: 3px; color: #dcdcdc; padding: 5px 12px; }
+QPushButton:hover { background: #3d3d3d; }
+QPushButton#primary { background: #e8862a; border: 0; color: #1a1a1a; font-weight: bold; padding: 7px 22px; }
+QPushButton#primary:hover { background: #f29a45; }
+QPushButton#preset { border-radius: 0; padding: 5px 12px; }
+QTreeWidget { background: #262626; border: 0; color: #e0e0e0; alternate-background-color: #292929; }
+QTreeWidget::item { height: 36px; border-bottom: 1px solid #2f2f2f; }
+QTreeWidget::item:selected { background: #36465c; color: #ffffff; }
+QHeaderView::section { background: #262626; color: #9a9a9a; border: 0; border-bottom: 1px solid #333; padding: 4px; }
+QCheckBox { color: #e6e6e6; spacing: 8px; }
+QCheckBox::indicator { width: 13px; height: 13px; border: 1px solid #7a7a7a; border-radius: 2px; background: #333; }
+QCheckBox::indicator:checked { background: #e8862a; border-color: #e8862a; }
+QCheckBox::indicator:indeterminate { background: #8a5a2a; border-color: #e8862a; }
+QScrollArea { border: 0; background: transparent; }
+QFrame#card { background: #2f2f2f; border-radius: 4px; }
+"""
 
-class LayerList(QtWidgets.QListWidget):
-    """Reorders by drag inside, takes folders/EXRs dropped from the Explorer
-    (InternalMove alone refuses outside drops)."""
+
+class LayerTree(QtWidgets.QTreeWidget):
+    """Layer table: reorders by drag inside (never nests), takes folders/EXRs
+    dropped from the Explorer."""
     dropped = QtCore.Signal(list)
+    reordered = QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setColumnCount(5)
+        self.setHeaderLabels(["", "Layer", "Type", "Passes", "Frames"])
+        self.setRootIsDecorated(False)
+        self.setIndentation(0)
+        self.setUniformRowHeights(True)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
+        self.setDefaultDropAction(QtCore.Qt.MoveAction)
+        self.setDropIndicatorShown(True)
+        head = self.header()
+        head.setStretchLastSection(False)
+        head.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        for col, w in ((0, 26), (2, 60), (3, 110), (4, 110)):
+            head.setSectionResizeMode(col, QtWidgets.QHeaderView.Fixed)
+            self.setColumnWidth(col, w)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -301,80 +533,205 @@ class LayerList(QtWidgets.QListWidget):
                 u.toLocalFile() for u in event.mimeData().urls())))
         else:
             super().dropEvent(event)
+            self.reordered.emit()
+
+
+def _label(text, name=None, wrap=False):
+    label = QtWidgets.QLabel(text)
+    label.setWordWrap(wrap)
+    if name:
+        label.setObjectName(name)
+    return label
+
+
+def _swatch(hex_color, size=12):
+    pix = QtGui.QPixmap(size, size)
+    pix.fill(QtGui.QColor(hex_color))
+    return QtGui.QIcon(pix)
+
+
+def _is_lpe(aov):
+    return any(aov in (c, "combined" + c, "direct" + c, "indirect" + c) for c in COMPONENTS)
 
 
 class CompDialog(QtWidgets.QDialog):
-    """Render layer folders (top = foreground) + passes -> build()."""
+    """Render layers (top = foreground) + per-layer passes -> build()."""
 
     def __init__(self, parent=None):
         import mke_project
-        import projectSetup as ui
         super().__init__(parent)
-        self.setWindowTitle("Copernicus Comp")
-        self.setStyleSheet(ui.STYLE)
-        self.setAcceptDrops(True)
-        self.resize(820, 480)
         self.prefs = mke_project
-        self.aovs = {}  # exr path -> AOV names
-        self.picked = {}  # exr path -> passes ticked for that layer
+        self.setWindowTitle("Copernicus Comp")
+        self.setStyleSheet(QSS)
+        self.setAcceptDrops(True)
+        self.resize(1180, 760)
+        self.aovs = {}     # exr path -> AOV names
+        self.picked = {}   # exr path -> passes ticked
+        self.types = {}    # exr path -> BG/CHAR/...
+        self.frames = {}   # exr path -> (first, last, missing)
+        self.labels = {}
+        self.name_edited = self.output_edited = False
+        self.loaded = None  # name of the comp loaded with Load existing comp
 
-        self.layers = LayerList()
-        self.layers.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        self.layers.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
-        self.layers.setDefaultDropAction(QtCore.Qt.MoveAction)  # inside: reorder
-        self.layers.dropped.connect(self.add_folders)
-        self.layers.itemSelectionChanged.connect(self.show_passes)
-        self.passes = QtWidgets.QListWidget()
-        self.passes.itemChanged.connect(self.pass_toggled)
-        self.paste = QtWidgets.QPlainTextEdit()
-        self.paste.setPlaceholderText("Paste folder paths here, one per line (\"Copy as path\" "
-                                      "quotes are fine), then Add paths. Ctrl+V on the list works too.")
-        self.paste.setFixedHeight(60)
-        add_paths = QtWidgets.QPushButton("Add paths")
-        add_paths.clicked.connect(self.add_pasted)
-        add = QtWidgets.QPushButton("Browse...")
+        main = QtWidgets.QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self._header())
+        body = QtWidgets.QHBoxLayout()
+        body.setSpacing(0)
+        body.addWidget(self._layers_panel(), 11)
+        line = QtWidgets.QFrame()
+        line.setFixedWidth(1)
+        line.setStyleSheet("background: #111;")
+        body.addWidget(line)
+        body.addWidget(self._inspector_panel(), 9)
+        main.addLayout(body, 1)
+        main.addWidget(self._footer())
+        self.refresh()
+
+    # ------------------------------------------------------------ layout
+    def _header(self):
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("bar")
+        row = QtWidgets.QHBoxLayout(bar)
+        row.setContentsMargins(16, 10, 16, 10)
+        dot = QtWidgets.QFrame()
+        dot.setFixedSize(10, 10)
+        dot.setStyleSheet("background: #e8862a; border-radius: 2px;")
+        row.addWidget(dot)
+        row.addWidget(_label("Copernicus Comp", "title"))
+        row.addWidget(_label("MK Utils", "muted"))
+        row.addStretch(1)
+        row.addWidget(_label("Name", "muted"))
+        self.name = QtWidgets.QLineEdit()
+        self.name.setFixedWidth(240)
+        self.name.textEdited.connect(self._name_edited)
+        row.addWidget(self.name)
+        load = QtWidgets.QPushButton("Load existing comp...")
+        load.clicked.connect(self.load_existing)
+        row.addWidget(load)
+        return bar
+
+    def _layers_panel(self):
+        panel = QtWidgets.QWidget()
+        col = QtWidgets.QVBoxLayout(panel)
+        col.setContentsMargins(16, 12, 16, 12)
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(_label("RENDER LAYERS", "section"))
+        self.count = _label("", "muted")
+        top.addWidget(self.count)
+        top.addStretch(1)
+        paste = QtWidgets.QPushButton("Paste paths")
+        paste.setCheckable(True)
+        browse = QtWidgets.QPushButton("Browse...")
         remove = QtWidgets.QPushButton("Remove")
-        up = QtWidgets.QPushButton("Up")
-        down = QtWidgets.QPushButton("Down")
-        self.error = ui._label("", "warning")
+        for b in (paste, browse, remove):
+            top.addWidget(b)
+        col.addLayout(top)
+
+        self.paste_row = QtWidgets.QWidget()
+        prow = QtWidgets.QHBoxLayout(self.paste_row)
+        prow.setContentsMargins(0, 0, 0, 0)
+        self.paste = QtWidgets.QPlainTextEdit()
+        self.paste.setPlaceholderText('One folder per line. "Copy as path" quotes, file:/// links, '
+                                      "$JOB/... and .exr files are fine.")
+        self.paste.setFixedHeight(58)
+        add = QtWidgets.QPushButton("Add")
+        prow.addWidget(self.paste, 1)
+        prow.addWidget(add)
+        self.paste_row.setVisible(False)
+        col.addWidget(self.paste_row)
+
+        self.tree = LayerTree()
+        col.addWidget(self.tree, 1)
+        col.addWidget(_label("Drop render layer folders here (Explorer), or Ctrl+V paths. "
+                             "Drag rows to reorder.", "drop", wrap=True))
+
+        paste.toggled.connect(self.paste_row.setVisible)
+        add.clicked.connect(self.add_pasted)
+        browse.clicked.connect(self.browse)
+        remove.clicked.connect(self.remove_selected)
+        self.tree.dropped.connect(self.add_folders)
+        self.tree.reordered.connect(self.refresh)
+        self.tree.itemSelectionChanged.connect(self.show_inspector)
+        return panel
+
+    def _inspector_panel(self):
+        panel = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(panel)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(8)
+        self.empty = _label("Select one or more layers to choose their passes.", "muted", wrap=True)
+        outer.addWidget(self.empty)
+        self.insp_box = QtWidgets.QWidget()  # hidden while no layer is selected
+        col = QtWidgets.QVBoxLayout(self.insp_box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        outer.addWidget(self.insp_box, 1)
+        self.empty_stretch = QtWidgets.QWidget()
+        outer.addWidget(self.empty_stretch, 1)
+        self.insp_title = _label("LAYER", "section")
+        self.insp_path = _label("", "mono", wrap=True)
+        col.addWidget(self.insp_title)
+        col.addWidget(self.insp_path)
+
+        trow = QtWidgets.QHBoxLayout()
+        trow.addWidget(_label("Type", "muted"))
+        self.type_box = QtWidgets.QComboBox()
+        for t in TYPES:
+            self.type_box.addItem(_swatch(TYPE_COLORS[t]), t)
+        self.type_box.activated.connect(self.set_type)
+        trow.addWidget(self.type_box)
+        trow.addStretch(1)
+        col.addLayout(trow)
+
+        prow = QtWidgets.QHBoxLayout()
+        prow.setSpacing(0)
+        self.presets = []
+        for name, key in (("Light passes", "lpe"), ("Light groups", "groups"), ("Beauty only", "none")):
+            b = QtWidgets.QPushButton(name)
+            b.setObjectName("preset")
+            b.clicked.connect(lambda _=False, k=key: self.apply_preset(k))
+            prow.addWidget(b)
+            self.presets.append(b)
+        prow.addStretch(1)
+        col.addLayout(prow)
+
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.viewport().setStyleSheet("background: #262626;")
+        col.addWidget(self.scroll, 1)
+
+        card = QtWidgets.QFrame()
+        card.setObjectName("card")
+        ccol = QtWidgets.QVBoxLayout(card)
+        ccol.addWidget(_label("OUTPUT", "section"))
+        self.output = QtWidgets.QLineEdit()
+        self.output.textEdited.connect(self._output_edited)
+        ccol.addWidget(self.output)
+        self.frames_label = _label("", "muted", wrap=True)
+        ccol.addWidget(self.frames_label)
+        outer.addWidget(card)
+        return panel
+
+    def _footer(self):
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("bar")
+        row = QtWidgets.QHBoxLayout(bar)
+        row.setContentsMargins(16, 10, 16, 10)
+        self.warnings = _label("", "warn", wrap=True)
+        row.addWidget(self.warnings, 1)
+        cancel = QtWidgets.QPushButton("Cancel")
+        cancel.clicked.connect(self.close)
         build_btn = QtWidgets.QPushButton("Build comp")
         build_btn.setObjectName("primary")
-        add.clicked.connect(self.browse)
-        remove.clicked.connect(self.remove_selected)
-        up.clicked.connect(lambda: self.move(-1))
-        down.clicked.connect(lambda: self.move(1))
+        build_btn.setDefault(True)
         build_btn.clicked.connect(self.build)
+        row.addWidget(cancel)
+        row.addWidget(build_btn)
+        return bar
 
-        left = QtWidgets.QVBoxLayout()
-        left.addWidget(ui._label("Render layers  (top = foreground)", "title"))
-        left.addWidget(ui._label("One folder per render layer: paste paths, drop folders "
-                                 "from the Explorer, or Browse.", "hint"))
-        paste_row = QtWidgets.QHBoxLayout()
-        paste_row.addWidget(self.paste, 1)
-        paste_row.addWidget(add_paths)
-        left.addLayout(paste_row)
-        left.addWidget(self.layers)
-        row = QtWidgets.QHBoxLayout()
-        for b in (add, remove, up, down):
-            row.addWidget(b)
-        left.addLayout(row)
-        right = QtWidgets.QVBoxLayout()
-        right.addWidget(ui._label("Passes", "title"))
-        right.addWidget(ui._label("Per layer: shows the selected layers' AOVs (all layers when "
-                                  "none is selected); ticks apply to those layers only. "
-                                  "Light passes are ticked by default.", "hint"))
-        right.addWidget(self.passes)
-        cols = QtWidgets.QHBoxLayout()
-        cols.addLayout(left, 3)
-        cols.addLayout(right, 2)
-        main = QtWidgets.QVBoxLayout(self)
-        main.addLayout(cols)
-        bottom = QtWidgets.QHBoxLayout()
-        bottom.addWidget(self.error, 1)
-        bottom.addWidget(build_btn)
-        main.addLayout(bottom)
-
-    # ------------------------------------------------------------ layers
+    # ------------------------------------------------------------ adding layers
     def browse(self):
         start = self.prefs.get_pref("comp_last_dir") or hou.text.expandString("$JOB")
         dlg = QtWidgets.QFileDialog(self, "Render layer folders (Ctrl/Shift for several)", start)
@@ -394,8 +751,10 @@ class CompDialog(QtWidgets.QDialog):
         self.paste.clear()
 
     def keyPressEvent(self, event):
-        # Ctrl+V anywhere but the paste box adds the clipboard paths directly
-        if event.matches(QtGui.QKeySequence.Paste) and not self.paste.hasFocus():
+        # Ctrl+V anywhere but a text field adds the clipboard paths directly
+        focus = QtWidgets.QApplication.focusWidget()
+        if event.matches(QtGui.QKeySequence.Paste) and not isinstance(
+                focus, (QtWidgets.QLineEdit, QtWidgets.QPlainTextEdit)):
             self.add_folders(parse_paths(QtWidgets.QApplication.clipboard().text()))
             return
         super().keyPressEvent(event)
@@ -408,107 +767,273 @@ class CompDialog(QtWidgets.QDialog):
         self.add_folders(parse_paths("\n".join(
             u.toLocalFile() for u in event.mimeData().urls())))
 
-    def add_folders(self, folders):
+    def add_folders(self, folders, layers=None):
+        """folders -> new layers on top. layers: [(path, passes, type)] to add as is."""
         known = set(self.paths())
-        empty = []
-        for folder in folders:
-            found = find_layers(folder)
-            if not found:
-                empty.append(os.path.basename(folder.rstrip("/\\")))
-            for p in found:
-                if p in known:
+        empty, added = [], []
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            todo = list(layers or [])
+            for folder in folders:
+                found = find_layers(folder)
+                if not found:
+                    empty.append(os.path.basename(folder.rstrip("/\\")) or folder)
+                todo += [(p, None, None) for p in found]
+            for path, passes, kind in reversed(todo):
+                if path in known:
                     continue
-                known.add(p)
-                item = QtWidgets.QListWidgetItem()
-                item.setData(QtCore.Qt.UserRole, p)
-                item.setToolTip(p)
-                self.layers.insertItem(0, item)  # new layers land on top
-        self.error.setText("No EXR in: " + ", ".join(empty) if empty else "")
+                known.add(path)
+                self.aovs[path] = layer_aovs(path)
+                self.picked[path] = set(light_passes(self.aovs[path]) if passes is None else passes)
+                self.types[path] = kind
+                self.frames[path] = frame_info(path)
+                item = QtWidgets.QTreeWidgetItem()
+                item.setData(0, QtCore.Qt.UserRole, path)
+                item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled |
+                              QtCore.Qt.ItemIsDragEnabled)  # no drop: rows never nest
+                self.tree.insertTopLevelItem(0, item)  # new layers land on top
+                added.append(item)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.empty_folders = empty
         self.refresh()
+        if added and not self.tree.selectedItems():
+            added[-1].setSelected(True)
 
     def remove_selected(self):
-        for item in self.layers.selectedItems():
-            self.layers.takeItem(self.layers.row(item))
+        for item in self.tree.selectedItems():
+            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
         self.refresh()
 
-    def move(self, step):
-        row = self.layers.currentRow()
-        if row >= 0 and 0 <= row + step < self.layers.count():
-            self.layers.insertItem(row + step, self.layers.takeItem(row))
-            self.layers.setCurrentRow(row + step)
-
     def paths(self):
-        return [self.layers.item(i).data(QtCore.Qt.UserRole) for i in range(self.layers.count())]
+        """Top (foreground) first."""
+        return [self.tree.topLevelItem(i).data(0, QtCore.Qt.UserRole)
+                for i in range(self.tree.topLevelItemCount())]
 
+    # ------------------------------------------------------------ table
     def refresh(self):
-        """Read new layers' AOVs (light passes ticked), relabel, redraw passes."""
         paths = self.paths()
-        for p in paths:
-            if p not in self.aovs:
-                self.aovs[p] = layer_aovs(p)
-                self.picked[p] = set(light_passes(self.aovs[p]))
         self.labels = dict(zip(paths, layer_labels(paths))) if paths else {}
-        self.update_layer_texts()
-        self.show_passes()
+        for p in paths:
+            if self.types.get(p) is None:
+                self.types[p] = layer_type(self.labels[p])
+        for i, p in enumerate(paths):
+            item = self.tree.topLevelItem(i)
+            kind = self.types[p]
+            item.setIcon(0, _swatch(TYPE_COLORS[kind]))
+            item.setText(1, self.labels[p])
+            item.setToolTip(1, p)
+            item.setText(2, kind)
+            item.setForeground(2, QtGui.QBrush(QtGui.QColor(TYPE_COLORS[kind])))
+            n = len(self.picked[p])
+            item.setText(3, "beauty only" if not n else "%d of %d AOVs" % (n, len(self.aovs[p])))
+            f1, f2, missing = self.frames[p]
+            item.setText(4, "%04d-%04d" % (f1, f2) if f1 is not None else "single")
+            item.setForeground(4, QtGui.QBrush(QtGui.QColor("#f0a24a" if missing else "#c8c8c8")))
+        self.count.setText("%d layer%s · top = foreground" % (len(paths), "" if len(paths) == 1 else "s")
+                           if paths else "")
+        if paths and not self.name_edited:
+            self.name.setText(self.default_name(paths))
+        self.update_output()
+        self.update_warnings()
+        self.show_inspector()
 
-    def update_layer_texts(self):
-        for i, p in enumerate(self.paths()):
-            self.layers.item(i).setText("%s    (%d passes / %d AOVs)" % (
-                self.labels[p], len(self.picked[p]), len(self.aovs[p])))
+    def default_name(self, paths):
+        bases = [re.sub(r"[._]?\$F\d.*$", "", os.path.basename(sequence_path(p)[0])) for p in paths]
+        common = os.path.commonprefix(bases) if len(bases) > 1 else bases[0]
+        common = re.sub(r"[._](usd)?render.*$", "", common).strip("._")
+        return re.sub(r"[^A-Za-z0-9_]", "_", common) or "comp"
 
-    def target_paths(self):
-        """Layers the pass list edits: the selected ones, else all."""
-        sel = [i.data(QtCore.Qt.UserRole) for i in self.layers.selectedItems()]
-        return sel or self.paths()
+    def _name_edited(self, _text):
+        self.name_edited = True
+        self.update_output()
 
-    def show_passes(self):
-        """AOVs of the target layers; partial tick when only some of them use it."""
-        targets = self.target_paths()
-        names = sorted({a for p in targets for a in self.aovs.get(p, ())
-                        if a != "C" and not a.startswith("Crypto")})
-        self.passes.blockSignals(True)
-        self.passes.clear()
-        for a in names:
-            having = [p for p in targets if a in self.aovs[p]]
-            on = sum(a in self.picked[p] for p in having)
-            text = a if len(having) == len(targets) else "%s   (%d/%d layers)" % (
-                a, len(having), len(targets))
-            item = QtWidgets.QListWidgetItem(text)
-            item.setData(QtCore.Qt.UserRole, a)
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-            item.setCheckState(QtCore.Qt.Unchecked if not on else QtCore.Qt.Checked
-                               if on == len(having) else QtCore.Qt.PartiallyChecked)
-            self.passes.addItem(item)
-        self.passes.blockSignals(False)
+    def _output_edited(self, _text):
+        self.output_edited = True
 
-    def pass_toggled(self, item):
-        a = item.data(QtCore.Qt.UserRole)
-        on = item.checkState() != QtCore.Qt.Unchecked  # partial click -> on for all
-        for p in self.target_paths():
-            if a in self.aovs[p]:
-                (self.picked[p].add if on else self.picked[p].discard)(a)
-        if item.checkState() == QtCore.Qt.PartiallyChecked:
-            self.passes.blockSignals(True)
-            item.setCheckState(QtCore.Qt.Checked)
-            self.passes.blockSignals(False)
-        self.update_layer_texts()
+    def update_output(self):
+        paths = self.paths()
+        ranges = [self.frames[p][:2] for p in paths if self.frames[p][0] is not None]
+        if ranges:
+            self.frames_label.setText("Frames %04d-%04d (union of the layers) · EXR half float" % (
+                min(r[0] for r in ranges), max(r[1] for r in ranges)))
+        if self.output_edited or not paths:
+            return
+        name = self.name.text().strip() or "comp"
+        job = hou.text.expandString("$JOB")
+        if job and os.path.isdir(os.path.join(job, "OUT")):
+            out = "%s/OUT/comp/%s/%s_comp.$F4.exr" % (job.replace("\\", "/"), name, name)
+        else:
+            out = default_output(list(reversed(paths)), name)
+        self.output.setText(out)
+
+    def update_warnings(self):
+        paths = self.paths()
+        lines = []
+        ranges = [self.frames[p][:2] for p in paths if self.frames[p][0] is not None]
+        if ranges:
+            usual = max(set(ranges), key=ranges.count)
+            odd = ["%s %04d-%04d" % (self.labels[p], *self.frames[p][:2]) for p in paths
+                   if self.frames[p][0] is not None and self.frames[p][:2] != usual]
+            if odd:
+                lines.append("Frame range differs from %04d-%04d: %s" % (usual + (", ".join(odd),)))
+        gaps = ["%s (%d)" % (self.labels[p], self.frames[p][2]) for p in paths if self.frames[p][2]]
+        if gaps:
+            lines.append("Missing frames: " + ", ".join(gaps))
+        no_beauty = [self.labels[p] for p in paths if "C" not in self.aovs[p]]
+        if no_beauty:
+            lines.append("No beauty (C) AOV: " + ", ".join(no_beauty))
+        if getattr(self, "empty_folders", None):
+            lines.append("No EXR in: " + ", ".join(self.empty_folders))
+        self.warnings.setText("\n".join(lines))
+
+    # ------------------------------------------------------------ inspector
+    def targets(self):
+        return [i.data(0, QtCore.Qt.UserRole) for i in self.tree.selectedItems()]
+
+    def show_inspector(self):
+        targets = self.targets()
+        self.insp_box.setVisible(bool(targets))
+        self.empty.setVisible(not targets)
+        self.empty_stretch.setVisible(not targets)
+        if not targets:
+            return
+        if len(targets) == 1:
+            self.insp_title.setText("LAYER · " + self.labels[targets[0]])
+            self.insp_path.setText(sequence_path(targets[0])[0])
+        else:
+            self.insp_title.setText("%d LAYERS" % len(targets))
+            self.insp_path.setText(", ".join(self.labels[p] for p in targets))
+        kinds = {self.types[p] for p in targets}
+        self.type_box.setCurrentIndex(TYPES.index(kinds.pop()) if len(kinds) == 1 else -1)
+
+        names = sorted({a for p in targets for a in self.aovs[p] if a != "C"})
+        lpe = [a for a in names if _is_lpe(a)]
+        groups = [a for a in names if a.startswith("C_")]
+        other = [a for a in names if a not in lpe and a not in groups]
+        crypto = [a for a in other if a.startswith("Crypto")]
+        utility = [a for a in other if not a.startswith("Crypto")]
+        any_lpe_on = any(self.picked[p] & set(lpe) for p in targets)
+
+        box = QtWidgets.QWidget()
+        box.setStyleSheet("background: #262626;")
+        lay = QtWidgets.QVBoxLayout(box)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(2)
+        for title, aovs in (("LIGHT PASSES (LPE) · ADDED BACK", lpe), ("LIGHT GROUPS", groups)):
+            if not aovs:
+                continue
+            lay.addWidget(_label(title, "section"))
+            for a in aovs:
+                lay.addLayout(self._pass_row(a, targets, any_lpe_on))
+            lay.addSpacing(10)
+        if utility or crypto:
+            lay.addWidget(_label("UTILITY · KEPT AS OUTPUTS, NEVER SUMMED", "section"))
+            text = " · ".join(utility + (["Cryptomatte (%d)" % len(crypto)] if crypto else []))
+            lay.addWidget(_label(text, "muted", wrap=True))
+        lay.addStretch(1)
+        self.scroll.setWidget(box)
+
+    def _pass_row(self, aov, targets, any_lpe_on):
+        having = [p for p in targets if aov in self.aovs[p]]
+        on = sum(aov in self.picked[p] for p in having)
+        row = QtWidgets.QHBoxLayout()
+        text = aov if len(having) == len(targets) else "%s   (%d/%d)" % (aov, len(having), len(targets))
+        cb = QtWidgets.QCheckBox(text)
+        cb.setTristate(True)
+        cb.setCheckState(QtCore.Qt.Unchecked if not on else
+                         QtCore.Qt.Checked if on == len(having) else QtCore.Qt.PartiallyChecked)
+        cb.clicked.connect(lambda _=False, a=aov, all_on=(on == len(having)): self.toggle(a, not all_on))
+        row.addWidget(cb)
+        row.addWidget(_label(self._overlap(aov, having, any_lpe_on), "warn"))
+        row.addStretch(1)
+        return row
+
+    def _overlap(self, aov, having, any_lpe_on):
+        """Short note when a ticked pass is already inside another ticked one."""
+        m = re.match(r"(direct|indirect)(\w+)$", aov)
+        if m and any("combined" + m.group(2) in self.picked[p] and aov in self.picked[p] for p in having):
+            return "inside combined" + m.group(2)
+        if aov.startswith("C_") and any_lpe_on and any(aov in self.picked[p] for p in having):
+            return "overlaps the light passes"
+        return ""
+
+    def toggle(self, aov, on):
+        for p in self.targets():
+            if aov in self.aovs[p]:
+                (self.picked[p].add if on else self.picked[p].discard)(aov)
+        self.refresh()
+
+    def apply_preset(self, key):
+        for p in self.targets():
+            aovs = self.aovs[p]
+            if key == "lpe":
+                self.picked[p] = set(light_passes([a for a in aovs if not a.startswith("C_")]))
+            elif key == "groups":
+                self.picked[p] = {a for a in aovs if a.startswith("C_")}
+            else:
+                self.picked[p] = set()
+        self.refresh()
+
+    def set_type(self, index):
+        for p in self.targets():
+            self.types[p] = TYPES[index]
+        self.refresh()
+
+    # ------------------------------------------------------------ existing comps
+    def load_existing(self):
+        comps = [n for n in (hou.node("/img") or hou.node("/obj")).children() if n.userData("mke_comp")]
+        if not comps:
+            hou.ui.displayMessage("No comp built by this tool in /img yet.")
+            return
+        if len(comps) > 1:
+            sel = hou.ui.selectFromList([c.name() for c in comps], exclusive=True,
+                                        title="Load existing comp")
+            if not sel:
+                return
+            comps = [comps[sel[0]]]
+        net = comps[0]
+        self.tree.clear()
+        layers = read_comp(net)  # top first
+        self.add_folders([], [(l["path"], l["passes"], l["type"]) for l in layers])
+        self.name.setText(net.userData("mke_comp"))
+        self.name_edited = True
+        rop = net.node("write_comp")
+        if rop is not None:
+            self.output.setText(rop.parm("copoutput").unexpandedString())
+            self.output_edited = True
+        self.loaded = net.userData("mke_comp")
+        self.refresh()
 
     # ------------------------------------------------------------ build
     def build(self):
         paths = self.paths()
         if not paths:
-            self.error.setText("Add at least one render layer folder.")
+            self.warnings.setText("Add at least one render layer.")
             return
+        name = re.sub(r"[^A-Za-z0-9_]", "_", self.name.text().strip()) or "comp"
+        parent = hou.node("/img") or hou.node("/obj")
+        replace = False
+        if parent.node("comp_" + name) is not None:
+            if self.loaded != name and QtWidgets.QMessageBox.question(
+                    self, "Copernicus Comp",
+                    "comp_%s already exists.\nReplace it? Knob values of layers with the same "
+                    "name are kept." % name) != QtWidgets.QMessageBox.Yes:
+                return
+            replace = True
         try:
-            # build() stacks bottom first; a layer with no pass ticked -> its beauty only
-            net = build(list(reversed(paths)), {p: sorted(self.picked[p]) for p in paths})
+            # build() stacks bottom first
+            net = build(list(reversed(paths)), {p: sorted(self.picked[p]) for p in paths},
+                        parent=parent, name=name, output=self.output.text().strip() or None,
+                        types=dict(self.types), replace=replace)
         except hou.Error as e:
-            self.error.setText(e.instanceMessage())
+            self.warnings.setText(e.instanceMessage())
             return
         net.setCurrent(True, clear_all_selected=True)
         if hou.isUIAvailable():
             pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
             if pane:
                 pane.setPwd(net)
+                pane.frameAll()
             hou.ui.setStatusMessage("Comp built in %s" % net.path())
         self.close()
