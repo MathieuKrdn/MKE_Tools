@@ -5,6 +5,8 @@ import re
 import webbrowser
 import mke_renderlayer
 import mke_utils
+from hutil.Qt import QtWidgets, QtCore
+
 
 def help():
     webbrowser.open("https://www.sidefx.com/docs/houdini/solaris/pattern.html")

@@ -10,7 +10,7 @@ import os
 import json
 from datetime import datetime
 import subprocess
-from PySide2 import QtWidgets, QtCore
+from hutil.Qt import QtWidgets, QtCore
 
 VERSION_REGEX = re.compile(r'v(\d{4})')
 USER_LOGIN = os.getlogin()

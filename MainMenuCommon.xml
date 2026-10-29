@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mainMenu>
+    <menuBar>
+        <subMenu id="mk_utils_menu">
+            <label>MK Utils</label>
+            
+            <scriptItem id="mke_project_setup">
+                <label>Projects</label>
+                <scriptCode><![CDATA[import projectSetup
+projectSetup.projects()]]></scriptCode>
+            </scriptItem>
+
+            
+            <scriptItem id="mke_daily_flipbook">
+                <label>Daily Flipbook</label>
+                <scriptCode><![CDATA[import mke_daily
+mke_daily.dailyFlipbook()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_discord_setup">
+                <label>Discord Notifications...</label>
+                <scriptCode><![CDATA[import mke_notify
+mke_notify.configure()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_discord_scene">
+                <label>Discord: enable on the scene's File Caches</label>
+                <scriptCode><![CDATA[import mke_notify
+mke_notify.setup_scene_filecaches()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_check_scene">
+                <label>Check Scene</label>
+                <scriptCode><![CDATA[import mke_check
+mke_check.check_selection()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_material_folder">
+                <label>Material from Texture Folder...</label>
+                <scriptCode><![CDATA[import mke_material
+mke_material.materialFromFolder()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_comp_from_render">
+                <label>Copernicus Comp from Render...</label>
+                <scriptCode><![CDATA[import mke_comp
+mke_comp.compFromRender()]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="mke_save_up">
+                <label>Save Up</label>
+                <scriptCode><![CDATA[import saveUp
+saveUp.saveUp()]]></scriptCode>
+            </scriptItem>
+            
+            
+        </subMenu>
+    </menuBar>
+</mainMenu>
