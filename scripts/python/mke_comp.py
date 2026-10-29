@@ -302,72 +302,114 @@ def default_output(paths, name):
     return os.path.dirname(sequence_path(paths[-1])[0]) + "/comp/" + name + "_comp.$F4.exr"
 
 
+LAST_CHANGES = []  # what the last build() created, rebuilt or removed (for the window's status)
+
+
 def build(paths, passes=None, parent=None, name=None, output=None, types=None,
           values=None, replace=False):
-    """Create the comp copnet. paths: one EXR (any frame) per render layer,
-    BOTTOM first. passes: None -> light_passes() per layer, a list for every
-    layer, or {path: list}. types: {path: 'BG'|...}. values: {label: knob values}
-    restored after the build. replace: rebuild an existing comp of that name,
-    keeping the knob values of layers with the same name."""
+    """Create the comp copnet, or update it in place. paths: one EXR (any frame)
+    per render layer, BOTTOM first. passes: None -> light_passes() per layer, a
+    list for every layer, or {path: list}. types: {path: 'BG'|...}. values:
+    {label: knob values} for new layers. replace: update an existing comp of that
+    name: only layers whose passes changed are rebuilt (knobs kept), new ones are
+    added, missing ones removed; the rest of the network is left alone."""
+    del LAST_CHANGES[:]
     if isinstance(paths, str):
         paths = [paths]
     labels = layer_labels(paths)
     seq = sequence_path(paths[0])[0]
     name = name or re.sub(r"[^A-Za-z0-9_]", "_", os.path.basename(seq).split(".")[0])
     parent = parent or hou.node("/img") or hou.node("/obj")
-    old = parent.node("comp_" + name)
-    if old is not None:
-        if not replace:
-            raise hou.Error("%s already exists" % old.path())
-        kept = {l["label"]: l["values"] for l in read_comp(old)}
-        kept.update(values or {})
-        values = kept
-        pos = old.position()
-        old.destroy()
-    net = parent.createNode("copnet", "comp_" + name)
-    if old is not None:
-        net.setPosition(pos)
+    net = parent.node("comp_" + name)
+    if net is not None and not replace:
+        raise hou.Error("%s already exists" % net.path())
+    if net is None:
+        net = parent.createNode("copnet", "comp_" + name)
+    existing = {s.userData("mke_comp_path"): s for s in net.children() if s.userData("mke_comp_path")}
+    old_order = [s for s in sorted(existing.values(), key=lambda s: s.position()[1])]
 
     n = len(paths)
-    node = None
+    subs = []
     first = last = None
     for i, (path, label) in enumerate(zip(paths, labels)):
-        y = -(n - 1 - i) * LAYER_DY  # foreground on top
-        sub = net.createNode("subnet", label)
-        sub.setPosition(hou.Vector2(0, y))
         kind = (types or {}).get(path) or layer_type(label)
-        sub.setUserData("mke_comp_type", kind)
-        sub.setColor(hou_color(kind))
-        layer_passes = passes.get(path) if isinstance(passes, dict) else passes
-        populate_layer(sub, path, layer_passes, (values or {}).get(label))
-        if node is None:
-            node = sub
+        want = passes.get(path) if isinstance(passes, dict) else passes
+        sub = existing.pop(path, None)
+        if sub is None:
+            sub = net.createNode("subnet", label)
+            sub.setPosition(hou.Vector2(0, -(n - 1 - i) * LAYER_DY))  # foreground on top
+            populate_layer(sub, path, want, (values or {}).get(label))
+            LAST_CHANGES.append(label + " added")
         else:
-            over = net.createNode("blend", "over_" + label)
-            over.parm("mode").set("over")
-            over.setInput(0, node)
-            over.setInput(1, sub)
-            over.setPosition(hou.Vector2(4, y))
-            node = over
+            src = sub.node("render")
+            aovs = src.outputNames() if src is not None else ()
+            target = [p for p in (light_passes(aovs) if want is None else want) if p in aovs]
+            current = [p for p in (sub.userData("mke_comp_passes") or "").split(",") if p]
+            if src is None or set(target) != set(current):
+                populate_layer(sub, path, want, knob_values(sub))
+                LAST_CHANGES.append(sub.name() + " passes updated")
+        if sub.userData("mke_comp_type") != kind:
+            sub.setUserData("mke_comp_type", kind)
+            sub.setColor(hou_color(kind))
+        subs.append(sub)
         f1, f2 = sequence_path(path)[1:]
         if f1 is not None:
             first = f1 if first is None else min(first, f1)
             last = f2 if last is None else max(last, f2)
+    gone = list(existing.values())
+    kept = [s for s in old_order if s not in gone]
+    for sub in gone:  # layers taken out of the list
+        LAST_CHANGES.append(sub.name() + " removed")
+        sub.destroy()
+    if kept != [s for s in subs if s in kept]:  # reordered: back on the grid
+        LAST_CHANGES.append("layer order")
+        for i, sub in enumerate(subs):
+            sub.setPosition(hou.Vector2(0, -(n - 1 - i) * LAYER_DY))
 
-    grade_node = net.createNode("bright", "final_grade")
-    grade_node.setInput(0, node)
-    grade_node.setPosition(hou.Vector2(8, 0))
-    out = net.createNode("null", "OUT")
-    out.setInput(0, grade_node)
-    out.setDisplayFlag(True)
-    out.setColor(hou.Color(0.9, 0.53, 0.16))
-    out.setPosition(hou.Vector2(8, -LAYER_DY))
-    rop = net.createNode("rop_image", "write_comp")
-    rop.setInput(0, out)
-    rop.setPosition(hou.Vector2(8, -2 * LAYER_DY))
-    rop.parm("copoutput").set(output or default_output(paths, name))
-    rop.parm("size1").set("float16")  # EXR half float
-    if first is not None:
+    # over stack: reuse over_<layer> nodes, rewire, drop the unused ones
+    node = subs[0]
+    used = set()
+    for sub in subs[1:]:
+        over = net.node("over_" + sub.name())
+        if over is None:
+            over = net.createNode("blend", "over_" + sub.name())
+            over.parm("mode").set("over")
+            over.setPosition(hou.Vector2(4, sub.position()[1]))
+        elif "layer order" in LAST_CHANGES:
+            over.setPosition(hou.Vector2(4, sub.position()[1]))
+        if over.input(0) != node:
+            over.setInput(0, node)
+        if over.input(1) != sub:
+            over.setInput(1, sub)
+        used.add(over)
+        node = over
+    for c in net.children():
+        if c.name().startswith("over_") and c not in used:
+            c.destroy()
+
+    grade_node = net.node("final_grade")
+    if grade_node is None:
+        grade_node = net.createNode("bright", "final_grade")
+        grade_node.setPosition(hou.Vector2(8, 0))
+    if grade_node.input(0) != node:
+        grade_node.setInput(0, node)
+    out = net.node("OUT")
+    if out is None:
+        out = net.createNode("null", "OUT")
+        out.setInput(0, grade_node)
+        out.setDisplayFlag(True)
+        out.setColor(hou.Color(0.9, 0.53, 0.16))
+        out.setPosition(hou.Vector2(8, -LAYER_DY))
+    rop = net.node("write_comp")
+    if rop is None:
+        rop = net.createNode("rop_image", "write_comp")
+        rop.setInput(0, out)
+        rop.setPosition(hou.Vector2(8, -2 * LAYER_DY))
+        rop.parm("size1").set("float16")  # EXR half float
+        rop.parm("copoutput").set(output or default_output(paths, name))
+    elif output and rop.parm("copoutput").unexpandedString() != output:
+        rop.parm("copoutput").set(output)
+    if first is not None and (rop.evalParm("trange") != 1 or (rop.evalParm("f1"), rop.evalParm("f2")) != (first, last)):
         rop.parm("trange").set(1)
         for parm, v in (("f1", first), ("f2", last), ("f3", 1)):
             rop.parm(parm).deleteAllKeyframes()
@@ -1017,8 +1059,9 @@ class CompDialog(QtWidgets.QDialog):
         if parent.node("comp_" + name) is not None:
             if self.loaded != name and QtWidgets.QMessageBox.question(
                     self, "Copernicus Comp",
-                    "comp_%s already exists.\nReplace it? Knob values of layers with the same "
-                    "name are kept." % name) != QtWidgets.QMessageBox.Yes:
+                    "comp_%s already exists.\nUpdate it? Only the layers you changed are rebuilt "
+                    "(their knobs kept); the rest of the network is left as is." % name
+            ) != QtWidgets.QMessageBox.Yes:
                 return
             replace = True
         try:
@@ -1032,8 +1075,8 @@ class CompDialog(QtWidgets.QDialog):
         net.setCurrent(True, clear_all_selected=True)
         if hou.isUIAvailable():
             pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
-            if pane:
+            if pane and not replace:
                 pane.setPwd(net)
                 pane.frameAll()
-            hou.ui.setStatusMessage("Comp built in %s" % net.path())
+            hou.ui.setStatusMessage("%s: %s" % (net.path(), ", ".join(LAST_CHANGES) or "nothing changed"))
         self.close()
