@@ -26,16 +26,24 @@ def webhook_url():
     return os.environ.get("MKE_DISCORD_WEBHOOK") or mke_project.get_pref("discord_webhook", "")
 
 
+def mention_id():
+    """Discord user ID to @mention, or "" when mentions are off (prefs discord_mention + discord_user_id)."""
+    user = str(mke_project.get_pref("discord_user_id", "")).strip()
+    return user if user.isdigit() and mke_project.get_pref("discord_mention", True) else ""
+
+
 DISCORD_FILE_LIMIT = 10 * 1024 * 1024  # webhook upload limit on a server without boosts
 
 
-def send(content, embed=None, url=None, wait=False, attachment=None):
+def send(content, embed=None, url=None, wait=False, attachment=None, mention=None):
     """POST to the Discord webhook, optionally with a file (skipped above Discord's upload limit).
     In Houdini's UI it runs in a thread so the session never waits on the network."""
     url = url or webhook_url()
     if not url:
         return False
-    payload = {"username": "Houdini", "content": content}
+    mention = mention_id() if mention is None else mention
+    payload = {"username": "Houdini", "content": f"<@{mention}> {content}" if mention else content,
+               "allowed_mentions": {"users": [mention] if mention else []}}
     if embed:
         payload["embeds"] = [embed]
     if attachment and os.path.isfile(attachment) and os.path.getsize(attachment) <= DISCORD_FILE_LIMIT:
@@ -222,17 +230,32 @@ def configure():
     url.setPlaceholderText("https://discord.com/api/webhooks/...")
     help_text = ui._label("On your Discord server: Channel settings > Integrations > Webhooks > New webhook > "
                           "Copy URL. Paste it here. It stays on this PC (Houdini prefs), never in scenes.", "hint")
+    mention = QtWidgets.QCheckBox("@mention me")
+    mention.setChecked(bool(mke_project.get_pref("discord_mention", True)))
+    user = QtWidgets.QLineEdit(str(mke_project.get_pref("discord_user_id", "")))
+    user.setPlaceholderText("Your Discord user ID (digits)")
+    user.setToolTip("Discord > Settings > Advanced > Developer Mode, then right-click your name > Copy User ID.")
     status = ui._label("", "hint")
     test = QtWidgets.QPushButton("Send a test")
     save = QtWidgets.QPushButton("Save")
     save.setObjectName("primary")
 
+    def user_id():
+        text = user.text().strip()
+        return text if mention.isChecked() and text.isdigit() else ""
+
     def do_test():
-        ok = send("👋 Test from Houdini: cache notifications will arrive here.", url=url.text().strip(), wait=True)
+        ok = send("👋 Test from Houdini: cache notifications will arrive here.", url=url.text().strip(), wait=True,
+                  mention=user_id())
         status.setText("Message sent, check your Discord channel." if ok else "Failed: check the webhook URL.")
 
     def do_save():
+        if mention.isChecked() and not user.text().strip().isdigit():
+            status.setText("The user ID must be digits only (or untick @mention me).")
+            return
         mke_project.set_pref("discord_webhook", url.text().strip())
+        mke_project.set_pref("discord_mention", mention.isChecked())
+        mke_project.set_pref("discord_user_id", user.text().strip())
         dialog.accept()
         hou.ui.setStatusMessage("Discord webhook saved")
 
@@ -241,6 +264,7 @@ def configure():
     layout = QtWidgets.QVBoxLayout(dialog)
     layout.addWidget(help_text)
     layout.addWidget(url)
+    layout.addLayout(ui._row(mention, user))
     layout.addWidget(status)
     layout.addLayout(ui._row(test, None, save))
     dialog.show()

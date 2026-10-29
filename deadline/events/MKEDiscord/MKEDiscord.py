@@ -23,8 +23,9 @@ def CleanupDeadlineEventListener(listener):
     listener.Cleanup()
 
 
-def _post(url, content, embed):
-    body = json.dumps({"username": "Deadline", "content": content, "embeds": [embed]}).encode("utf-8")
+def _post(url, content, embed, mention=""):
+    body = json.dumps({"username": "Deadline", "content": f"<@{mention}> {content}" if mention else content,
+                       "embeds": [embed], "allowed_mentions": {"users": [mention] if mention else []}}).encode("utf-8")
     request = urllib.request.Request(url, data=body, method="POST",
                                      headers={"Content-Type": "application/json", "User-Agent": "MKE_Tools"})
     urllib.request.urlopen(request, timeout=15).close()
@@ -71,20 +72,23 @@ class MKEDiscordListener(DeadlineEventListener):
     def prefs_path(self):
         return self.GetConfigEntryWithDefault("PrefsFile", "")
 
-    def webhook(self):
+    def prefs(self):
         try:
             with open(self.prefs_path(), encoding="utf-8") as f:
-                return json.load(f).get("discord_webhook", "")
+                return json.load(f)
         except (OSError, ValueError):
-            return ""
+            return {}
 
     def send(self, content, embed):
-        url = self.webhook()
+        prefs = self.prefs()
+        url = prefs.get("discord_webhook", "")
         if not url:
             self.LogInfo("[MKEDiscord] no webhook configured, nothing sent")
             return
+        user = str(prefs.get("discord_user_id", "")).strip()
+        mention = user if user.isdigit() and prefs.get("discord_mention", True) else ""
         try:
-            _post(url, content, embed)
+            _post(url, content, embed, mention)
         except Exception as error:
             self.LogWarning(f"[MKEDiscord] Discord unreachable: {error}")
 
