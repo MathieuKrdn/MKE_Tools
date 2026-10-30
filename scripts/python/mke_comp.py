@@ -316,6 +316,11 @@ def build(paths, passes=None, parent=None, name=None, output=None, types=None,
     del LAST_CHANGES[:]
     if isinstance(paths, str):
         paths = [paths]
+    # layers are matched by path (userData stores it with '/'): normalise so D:\x and D:/x are one layer
+    paths = [p.replace("\\", "/") for p in paths]
+    if isinstance(passes, dict):
+        passes = {k.replace("\\", "/"): v for k, v in passes.items()}
+    types = {k.replace("\\", "/"): v for k, v in (types or {}).items()}
     labels = layer_labels(paths)
     seq = sequence_path(paths[0])[0]
     name = name or re.sub(r"[^A-Za-z0-9_]", "_", os.path.basename(seq).split(".")[0])

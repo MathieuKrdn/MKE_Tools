@@ -85,12 +85,15 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
         writer.write("Frames={}\n".format(FrameList))
 
     # Create plugin info file: Houdini's python runs husk for each task (works whatever Houdini version Deadline knows).
-    import glob
+    import sys
     import datetime
     import mke_deadline
     import mke_project
     hfs = hou.getenv("HFS")
-    python = (glob.glob(os.path.join(hfs, "python3*", "python.exe")) or [os.path.join(hfs, "bin", "hython.exe")])[0]
+    # H21 ships python37/39/311 side by side: take the one this Houdini runs
+    python = os.path.join(hfs, "python%d%d" % sys.version_info[:2], "python.exe")
+    if not os.path.isfile(python):
+        python = os.path.join(hfs, "bin", "hython.exe")
     husk = os.path.join(hfs, "bin", "husk.exe")
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mke_husk_render.py")
     renderer = {"0": "BRAY_HdKarma", "cpu": "BRAY_HdKarma", "1": "BRAY_HdKarmaXPU", "xpu": "BRAY_HdKarmaXPU"}.get(
