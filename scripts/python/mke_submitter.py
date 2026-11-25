@@ -42,6 +42,7 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     """
     hip_file = hou.hipFile.name()
     hip_name = os.path.splitext(os.path.basename(hip_file))[0]
+    pool, group = farm_pool_group(renderEngine, pool, group)
     #Create Job file
     jobInfoFilename = os.path.join(tempfile.gettempdir(), "usd_job_info.job")
     with open(jobInfoFilename, "w", encoding="utf-8") as writer:
@@ -131,6 +132,22 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     QtWidgets.QMessageBox.information(None, "Submission Results", results.stdout)
     hda.setColor(hou.Color((0, 1, 0)))  # Set color to green on successful submission
     hda.parm("exportexr").set(exr_save_path)
+
+
+KARMA_GROUPS = {"0": "karma_cpu", "cpu": "karma_cpu", "1": "karma_xpu", "xpu": "karma_xpu"}
+
+
+def farm_pool_group(renderEngine, pool, group):
+    """Karma CPU/XPU: pool 'houdini' and group karma_cpu/karma_xpu (Deadline names),
+    unless the Pool/Group fields were filled by hand."""
+    karma_group = KARMA_GROUPS.get(str(renderEngine).strip('"').lower())
+    if not karma_group:
+        return pool, group
+    if pool.strip('"').lower() in ("", "none"):
+        pool = "houdini"
+    if group.strip('"').lower() in ("", "none"):
+        group = karma_group
+    return pool, group
 
 
 def parse_frames(text, start, end):
