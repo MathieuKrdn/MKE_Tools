@@ -127,7 +127,7 @@ def analyze_shaders_and_textures(stage, dependencies, texture_exts):
                                 dependencies['textures'][resolved_path].append(context)
         
         # Check dome lights specifically
-        elif prim.GetTypeName() == 'DomeLight':
+        elif prim.GetTypeName().startswith('DomeLight'):  # H22 Dome Light 3.0 is 'DomeLight_1'
             
             # Check common dome light texture attributes
             dome_texture_attrs = [
