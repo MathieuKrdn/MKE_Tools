@@ -96,7 +96,10 @@ def submitPythonJob(self, hda, jobName, jobOutput="", jobPool="", jobSndPool="",
     if not os.path.isfile(python):
         python = os.path.join(hfs, "bin", "hython.exe")
     husk = os.path.join(hfs, "bin", "husk.exe")
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mke_husk_render.py")
+    # the second worker has no MKE_Tools: the script travels next to the USD, on a drive it can read
+    script = os.path.join(os.path.dirname(self.scene_file), ".mke_husk_render.py")
+    import shutil
+    shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mke_husk_render.py"), script)
     renderer = {"0": "BRAY_HdKarma", "cpu": "BRAY_HdKarma", "1": "BRAY_HdKarmaXPU", "xpu": "BRAY_HdKarmaXPU"}.get(
         str(renderEngine).lower(), "BRAY_HdKarma")
     output = self.exr_save_path.replace("####", "$F4")
